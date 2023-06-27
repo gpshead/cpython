@@ -1325,7 +1325,6 @@ class TestArchives(BaseTest, unittest.TestCase):
 
     ### shutil.make_archive
 
-    @support.requires_zlib()
     def test_make_tarball(self):
         # creating something to tar
         root_dir, base_dir = self._create_files('')
@@ -1381,7 +1380,6 @@ class TestArchives(BaseTest, unittest.TestCase):
             write_file((root_dir, 'outer'), 'xxx')
         return root_dir, base_dir
 
-    @support.requires_zlib()
     @unittest.skipUnless(shutil.which('tar'),
                          'Need the tar command to run')
     def test_tarfile_vs_tar(self):
@@ -1414,7 +1412,6 @@ class TestArchives(BaseTest, unittest.TestCase):
         self.assertEqual(tarball, base_name + '.tar')
         self.assertTrue(os.path.isfile(tarball))
 
-    @support.requires_zlib()
     def test_make_zipfile(self):
         # creating something to zip
         root_dir, base_dir = self._create_files()
@@ -1451,7 +1448,6 @@ class TestArchives(BaseTest, unittest.TestCase):
                     ['dist/', 'dist/sub/', 'dist/sub2/',
                      'dist/file1', 'dist/file2', 'dist/sub/file3'])
 
-    @support.requires_zlib()
     @unittest.skipUnless(shutil.which('zip'),
                          'Need the zip command to run')
     def test_zipfile_vs_zip(self):
@@ -1477,7 +1473,6 @@ class TestArchives(BaseTest, unittest.TestCase):
             names2 = zf.namelist()
         self.assertEqual(sorted(names), sorted(names2))
 
-    @support.requires_zlib()
     @unittest.skipUnless(shutil.which('unzip'),
                          'Need the unzip command to run')
     def test_unzip_zipfile(self):
@@ -1506,7 +1501,6 @@ class TestArchives(BaseTest, unittest.TestCase):
         base_name = os.path.join(tmpdir, 'archive')
         self.assertRaises(ValueError, make_archive, base_name, 'xxx')
 
-    @support.requires_zlib()
     def test_make_archive_owner_group(self):
         # testing make_archive with owner and group, with various combinations
         # this works even if there's not gid/uid support
@@ -1533,8 +1527,6 @@ class TestArchives(BaseTest, unittest.TestCase):
                            owner='kjhkjhkjg', group='oihohoh')
         self.assertTrue(os.path.isfile(res))
 
-
-    @support.requires_zlib()
     @unittest.skipUnless(UID_GID_SUPPORT, "Requires grp and pwd support")
     def test_tarfile_root_owner(self):
         root_dir, base_dir = self._create_files()
@@ -1579,7 +1571,6 @@ class TestArchives(BaseTest, unittest.TestCase):
             self.assertEqual(make_archive('test', 'tar'), 'test.tar')
             self.assertTrue(os.path.isfile('test.tar'))
 
-    @support.requires_zlib()
     def test_make_zipfile_in_curdir(self):
         # Issue #21280
         root_dir = self.mkdtemp()
@@ -1634,7 +1625,6 @@ class TestArchives(BaseTest, unittest.TestCase):
     def test_unpack_archive_tar(self):
         self.check_unpack_archive('tar')
 
-    @support.requires_zlib()
     def test_unpack_archive_gztar(self):
         self.check_unpack_archive('gztar')
 
@@ -1647,7 +1637,6 @@ class TestArchives(BaseTest, unittest.TestCase):
     def test_unpack_archive_xztar(self):
         self.check_unpack_archive('xztar')
 
-    @support.requires_zlib()
     def test_unpack_archive_zip(self):
         self.check_unpack_archive('zip')
 
