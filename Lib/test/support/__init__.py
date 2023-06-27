@@ -39,7 +39,7 @@ __all__ = [
     "BasicTestRunner", "run_unittest", "run_doctest",
     "requires_gzip", "requires_bz2", "requires_lzma",
     "bigmemtest", "bigaddrspacetest", "cpython_only", "get_attribute",
-    "requires_IEEE_754", "requires_zlib",
+    "requires_IEEE_754",
     "has_fork_support", "requires_fork",
     "has_subprocess_support", "requires_subprocess",
     "anticipate_failure", "load_package_tests", "detect_api_mismatch",
@@ -452,13 +452,6 @@ SOCK_MAX_SIZE = 16 * 1024 * 1024 + 1
 requires_IEEE_754 = unittest.skipUnless(
     float.__getformat__("double").startswith("IEEE"),
     "test requires IEEE 754 doubles")
-
-def requires_zlib(reason='requires zlib'):
-    try:
-        import zlib
-    except ImportError:
-        zlib = None
-    return unittest.skipUnless(zlib, reason)
 
 def requires_gzip(reason='requires gzip'):
     try:

@@ -702,11 +702,6 @@ The :mod:`test.support` module defines the following functions:
    Decorator for skipping tests on non-IEEE 754 platforms.
 
 
-.. decorator:: requires_zlib
-
-   Decorator for skipping tests if :mod:`zlib` doesn't exist.
-
-
 .. decorator:: requires_gzip
 
    Decorator for skipping tests if :mod:`gzip` doesn't exist.
