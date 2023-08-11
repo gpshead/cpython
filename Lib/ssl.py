@@ -1000,8 +1000,11 @@ class SSLSocket(socket):
             try:
                 # We are not connected so this is not supposed to block, but
                 # testing revealed otherwise on macOS and Windows so we do
-                # the non-blocking dance regardless.
-                notconn_pre_handshake_data = self.recv(1, _socket.MSG_PEEK)
+                # the non-blocking dance regardless. MSG_PEEK is not used as
+                # some tests were found using unix domain sockets where that
+                # flag leads to an EINVAL error. Our expection when any data
+                # is found means actually consuming this data is harmless.
+                notconn_pre_handshake_data = self.recv(1)
             except OSError as e:
                 if e.errno != errno.ENOTCONN:
                     raise
