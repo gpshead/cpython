@@ -976,7 +976,6 @@ class SSLSocket(socket):
         self = cls.__new__(cls, **kwargs)
         super(SSLSocket, self).__init__(**kwargs)
         sock_timeout = sock.gettimeout()
-        self.settimeout(sock_timeout)
         sock.detach()
 
         self._context = context
@@ -1010,7 +1009,6 @@ class SSLSocket(socket):
                 notconn_pre_handshake_data = b''
             finally:
                 self.setblocking(blocking)
-                self.settimeout(sock_timeout)  # setblocking undid this.
             if notconn_pre_handshake_data:
                 # This prevents pending data sent to the socket before it was
                 # closed from escaping to the caller who could otherwise
@@ -1019,6 +1017,7 @@ class SSLSocket(socket):
         else:
             connected = True
 
+        self.settimeout(sock_timeout)  # Must come after setblocking() calls.
         self._connected = connected
         if connected:
             # create the SSL object
