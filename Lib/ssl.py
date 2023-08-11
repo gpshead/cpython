@@ -1007,8 +1007,7 @@ class SSLSocket(socket):
                 if e.errno not in (errno.ENOTCONN, errno.EINVAL):
                     raise
                 notconn_pre_handshake_data = b''
-            finally:
-                self.setblocking(blocking)
+            self.setblocking(blocking)
             if notconn_pre_handshake_data:
                 # This prevents pending data sent to the socket before it was
                 # closed from escaping to the caller who could otherwise
