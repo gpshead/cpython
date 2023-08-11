@@ -994,6 +994,18 @@ class SSLSocket(socket):
             if e.errno != errno.ENOTCONN:
                 raise
             connected = False
+            try:
+                # We are not connected so this cannot block.
+                notconn_pre_handshake_data = self.recv(1, _socket.MSG_PEEK)
+            except OSError as e:
+                if e.errno != errno.ENOTCONN:
+                    raise
+                notconn_pre_handshake_data = b''
+            if notconn_pre_handshake_data:
+                # This prevents pending data sent to the socket before it was
+                # closed from escaping to the caller who could otherwise
+                # presume it came through a successful TLS connection.
+                raise SSLError("socket closed before TLS handshake with data in recv buffer.")
         else:
             connected = True
 
