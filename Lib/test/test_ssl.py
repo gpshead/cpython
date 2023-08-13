@@ -4719,7 +4719,7 @@ class TestPreHandshakeClose(unittest.TestCase):
                     except OSError:
                         pass  # closed, protocol error, etc.
 
-    def non_linux_skip_if_wrong_error(self, err):
+    def non_linux_skip_if_other_okay_error(self, err):
         if sys.platform == "linux":
             return  # Expect the full test setup to always work on Linux.
         if (isinstance(err, ConnectionResetError) or
@@ -4735,6 +4735,9 @@ class TestPreHandshakeClose(unittest.TestCase):
             # does not present as doing so.
             self.skipTest(f"Could not recreate conditions on {sys.platform}:"
                           f" {err=}")
+        # If maintaining this conditional winds up being a problem.
+        # just turn this into an unconditional skip anything but Linux.
+        # The important thing is that our CI has the logic covered.
 
     def test_preauth_data_to_tls_server(self):
         server_accept_called = threading.Event()
@@ -4759,17 +4762,19 @@ class TestPreHandshakeClose(unittest.TestCase):
 
             server_accept_called.wait()
             client.send(b"DELETE /data HTTP/1.0\r\n\r\n")
+            client.close()  # RST
 
         ready_for_server_wrap_socket.set()
         server.join()
-        self.assertFalse(server.received_data)
-        self.assertIsInstance(server.wrap_error, OSError)  # All platforms.
-        self.non_linux_skip_if_wrong_error(server.wrap_error)
-        self.assertIsInstance(server.wrap_error, ssl.SSLError)
-        self.assertIn("before TLS handshake with data", server.wrap_error.args[1])
-        self.assertIn("before TLS handshake with data", server.wrap_error.reason)
-        self.assertNotEqual(0, server.wrap_error.args[0])
-        self.assertIsNone(server.wrap_error.library, msg="attr must exist")
+        wrap_error = server.wrap_error
+        self.assertEqual(b"", server.received_data)
+        self.assertIsInstance(wrap_error, OSError)  # All platforms.
+        self.non_linux_skip_if_other_okay_error(wrap_error)
+        self.assertIsInstance(wrap_error, ssl.SSLError)
+        self.assertIn("before TLS handshake with data", wrap_error.args[1])
+        self.assertIn("before TLS handshake with data", wrap_error.reason)
+        self.assertNotEqual(0, wrap_error.args[0])
+        self.assertIsNone(wrap_error.library, msg="attr must exist")
 
 
     def test_preauth_data_to_tls_client(self):
@@ -4780,9 +4785,9 @@ class TestPreHandshakeClose(unittest.TestCase):
             set_socket_so_linger_on_with_zero_timeout(conn_to_client)
             conn_to_client.send(
                     b"307 Temporary Redirect\r\n"
-                    b"Location: https://example.com/data_exfiltration\r\n"
+                    b"Location: https://example.com/someone-elses-server\r\n"
                     b"\r\n")
-            conn_to_client.close()
+            conn_to_client.close()  # RST
             client_can_continue_with_wrap_socket.set()
             return True  # Tell the server to stop.
 
@@ -4807,11 +4812,12 @@ class TestPreHandshakeClose(unittest.TestCase):
             else:
                 wrap_error = None
                 received_data = tls_client.recv(400)
+                tls_client.close()
 
         server.join()
-        self.assertFalse(received_data)
+        self.assertEqual(b"", received_data)
         self.assertIsInstance(wrap_error, OSError)  # All platforms.
-        self.non_linux_skip_if_wrong_error(wrap_error)
+        self.non_linux_skip_if_other_okay_error(wrap_error)
         self.assertIsInstance(wrap_error, ssl.SSLError)
         self.assertIn("before TLS handshake with data", wrap_error.args[1])
         self.assertIn("before TLS handshake with data", wrap_error.reason)
