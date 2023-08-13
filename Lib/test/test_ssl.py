@@ -17,6 +17,7 @@ import struct
 import time
 import enum
 import gc
+import http.client
 import os
 import errno
 import pprint
@@ -4752,7 +4753,7 @@ class TestPreHandshakeClose(unittest.TestCase):
         server = self.SingleConnectionTestServerThread(
                 call_after_accept=call_after_accept,
                 name="preauth_data_to_tls_server")
-        self.enterContext(server)  # starts it & unittest.TestCase shuts it down.
+        self.enterContext(server)  # starts it & unittest.TestCase stops it.
 
         with socket.socket() as client:
             client.connect(server.listener.getsockname())
@@ -4776,7 +4777,6 @@ class TestPreHandshakeClose(unittest.TestCase):
         self.assertNotEqual(0, wrap_error.args[0])
         self.assertIsNone(wrap_error.library, msg="attr must exist")
 
-
     def test_preauth_data_to_tls_client(self):
         client_can_continue_with_wrap_socket = threading.Event()
 
@@ -4784,7 +4784,7 @@ class TestPreHandshakeClose(unittest.TestCase):
             # This forces an immediate connection close via RST on .close().
             set_socket_so_linger_on_with_zero_timeout(conn_to_client)
             conn_to_client.send(
-                    b"307 Temporary Redirect\r\n"
+                    b"HTTP/1.0 307 Temporary Redirect\r\n"
                     b"Location: https://example.com/someone-elses-server\r\n"
                     b"\r\n")
             conn_to_client.close()  # RST
@@ -4794,7 +4794,7 @@ class TestPreHandshakeClose(unittest.TestCase):
         server = self.SingleConnectionTestServerThread(
                 call_after_accept=call_after_accept,
                 name="preauth_data_to_tls_client")
-        self.enterContext(server)  # starts it & unittest.TestCase shuts it down.
+        self.enterContext(server)  # starts it & unittest.TestCase stops it.
         # Redundant; call_after_accept sets SO_LINGER on the accepted conn.
         set_socket_so_linger_on_with_zero_timeout(server.listener)
 
@@ -4823,6 +4823,51 @@ class TestPreHandshakeClose(unittest.TestCase):
         self.assertIn("before TLS handshake with data", wrap_error.reason)
         self.assertNotEqual(0, wrap_error.args[0])
         self.assertIsNone(wrap_error.library, msg="attr must exist")
+
+    def test_https_client_non_tls_response_ignored(self):
+
+        server_responding = threading.Event()
+
+        class SynchronizedHTTPSConnection(http.client.HTTPSConnection):
+            def connect(self):
+                http.client.HTTPConnection.connect(self)
+                # Wait for our fault injection server to have done its thing.
+                if not server_responding.wait(1.0) and support.verbose:
+                    sys.stdout.write("server_responding event never set.")
+                self.sock = self._context.wrap_socket(
+                        self.sock, server_hostname=self.host)
+
+        def call_after_accept(conn_to_client):
+            # This forces an immediate connection close via RST on .close().
+            set_socket_so_linger_on_with_zero_timeout(conn_to_client)
+            conn_to_client.send(
+                    b"HTTP/1.0 402 Payment Required\r\n"
+                    b"\r\n")
+            conn_to_client.close()  # RST
+            server_responding.set()
+            return True  # Tell the server to stop.
+
+        server = self.SingleConnectionTestServerThread(
+                call_after_accept=call_after_accept,
+                name="non_tls_http_RST_responder")
+        self.enterContext(server)  # starts it & unittest.TestCase stops it.
+        # Redundant; call_after_accept sets SO_LINGER on the accepted conn.
+        set_socket_so_linger_on_with_zero_timeout(server.listener)
+
+        connection = SynchronizedHTTPSConnection(
+                f"localhost",
+                port=server.port,
+                context=ssl.create_default_context(),
+                timeout=2.0,
+        )
+        # There are lots of reasons this raises as desired, long before this
+        # test was added. Sending the request requires a successful TLS wrapped
+        # socket; that fails if the connection is broken. It may seem pointless
+        # to test this. It serves as an illustration of something that we never
+        # want to happen... properly not happening.
+        with self.assertRaises(OSError) as err_ctx:
+            connection.request("HEAD", "/test", headers={"Host": "localhost"})
+            response = connection.getresponse()
 
 
 class TestEnumerations(unittest.TestCase):
