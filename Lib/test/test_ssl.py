@@ -12,6 +12,7 @@ from test.support import warnings_helper
 from test.support import asyncore
 import socket
 import select
+import struct
 import time
 import enum
 import gc
@@ -4657,6 +4658,154 @@ class TestSSLDebug(unittest.TestCase):
             with client_context.wrap_socket(socket.socket(),
                                             server_hostname=hostname) as s:
                 s.connect((HOST, server.port))
+
+
+def set_socket_so_linger_on_with_zero_timeout(sock):
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+
+
+class TestPreHandshakeClose(unittest.TestCase):
+    """Verify behavior of close sockets with received data before to the handshake.
+    """
+
+    class SingleConnectionTestServerThread(threading.Thread):
+
+        def __init__(self, *, name, call_after_accept):
+            self.call_after_accept = call_after_accept
+            self.received_data = b''  # set by .run()
+            self.wrap_error = None  # set by .run()
+            self.listener = None  # set by .start()
+            self.port = None  # set by .start()
+            super().__init__(name=name)
+
+        def __enter__(self):
+            self.start()
+            return self
+
+        def __exit__(self, *args):
+            try:
+                if self.listener:
+                    self.listener.close()
+            except OSError:
+                pass
+            self.join()
+            self.wrap_error = None  # avoid dangling references
+
+        def start(self):
+            self.ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            self.ssl_ctx.verify_mode = ssl.CERT_REQUIRED
+            self.ssl_ctx.load_verify_locations(cafile=ONLYCERT)
+            self.ssl_ctx.load_cert_chain(certfile=ONLYCERT, keyfile=ONLYKEY)
+            self.listener = socket.socket()
+            self.port = socket_helper.bind_port(self.listener)
+            self.listener.settimeout(2.0)
+            self.listener.listen(1)
+            super().start()
+
+        def run(self):
+            conn, address = self.listener.accept()
+            self.listener.close()
+            with conn:
+                if self.call_after_accept(conn):
+                    return
+                try:
+                    tls_socket = self.ssl_ctx.wrap_socket(conn, server_side=True)
+                except OSError as err:  # ssl.SSLError inherits from OSError
+                    self.wrap_error = err
+                else:
+                    try:
+                        self.received_data = tls_socket.recv(400)
+                    except OSError:
+                        pass  # closed, protocol error, etc.
+
+    def skip_on_non_linux_if_wrong_ssl_error(self, s_err):
+        if 'WRONG_VERSION_NUMBER' in s_err.reason and sys.platform != 'linux':
+            # If ssl_ctx.wrap_socket() winds up doing the actual wrapping we get
+            # an SSLError from OpenSSL, typically WRONG_VERSION_NUMBER. That is
+            # not what we're trying to test. The way this test is written is
+            # known to work on Linux. We skip the rest on other platforms if
+            # this happens. The important behavior of SSLError is confirmed.
+            self.skipTest(f"Failed to setup test condition on {sys.platform}.")
+
+    def test_preauth_data_to_tls_server(self):
+        server_accept_called = threading.Event()
+        ready_for_server_wrap_socket = threading.Event()
+
+        def call_after_accept(unused):
+            server_accept_called.set()
+            if not ready_for_server_wrap_socket.wait(2.0):
+                raise RuntimeError("wrap_socket event never set, test may fail.")
+            return False  # Tell the server thread to continue.
+
+        server = self.SingleConnectionTestServerThread(
+                call_after_accept=call_after_accept,
+                name="preauth_data_to_tls_server")
+        self.enterContext(server)  # starts it & unittest.TestCase shuts it down.
+
+        with socket.socket() as client:
+            client.connect(server.listener.getsockname())
+            # This forces an immediate connection close via RST on .close().
+            set_socket_so_linger_on_with_zero_timeout(client)
+            client.setblocking(False)
+
+            server_accept_called.wait()
+            client.send(b"DELETE /data HTTP/1.0\r\n\r\n")
+
+        ready_for_server_wrap_socket.set()
+        server.join()
+        self.assertFalse(server.received_data)
+        self.assertIsInstance(server.wrap_error, ssl.SSLError)
+        self.skip_on_non_linux_if_wrong_ssl_error(server.wrap_error)
+        self.assertIn("before TLS handshake with data", server.wrap_error.args[1])
+        self.assertIn("before TLS handshake with data", server.wrap_error.reason)
+        self.assertNotEqual(0, server.wrap_error.args[0])
+        self.assertIsNone(server.wrap_error.library, msg="attr must exist.")
+
+
+    def test_preauth_data_to_tls_client(self):
+        client_can_continue_with_wrap_socket = threading.Event()
+
+        def call_after_accept(conn_to_client):
+            # This forces an immediate connection close via RST on .close().
+            set_socket_so_linger_on_with_zero_timeout(conn_to_client)
+            conn_to_client.send(
+                    b"307 Temporary Redirect\r\n"
+                    b"Location: https://example.com/data_exfiltration\r\n"
+                    b"\r\n")
+            conn_to_client.close()
+            client_can_continue_with_wrap_socket.set()
+            return True  # Tell the server to stop.
+
+        server = self.SingleConnectionTestServerThread(
+                call_after_accept=call_after_accept,
+                name="preauth_data_to_tls_client")
+        self.enterContext(server)  # starts it & unittest.TestCase shuts it down.
+        # Redundant; call_after_accept sets SO_LINGER on the accepted conn.
+        set_socket_so_linger_on_with_zero_timeout(server.listener)
+
+        with socket.socket() as client:
+            client.connect(server.listener.getsockname())
+            if not client_can_continue_with_wrap_socket.wait(2.0):
+                self.fail("test server took too long.")
+            ssl_ctx = ssl.create_default_context()
+            try:
+                tls_client = ssl_ctx.wrap_socket(
+                        client, server_hostname="localhost")
+            except OSError as err:  # SSLError inherits from OSError
+                wrap_error = err
+                received_data = b""
+            else:
+                wrap_error = None
+                received_data = tls_client.recv(400)
+
+        server.join()
+        self.assertIsInstance(wrap_error, ssl.SSLError)
+        self.skip_on_non_linux_if_wrong_ssl_error(wrap_error)
+        self.assertIn("before TLS handshake with data", wrap_error.args[1])
+        self.assertIn("before TLS handshake with data", wrap_error.reason)
+        self.assertNotEqual(0, wrap_error.args[0])
+        self.assertIsNone(wrap_error.library, msg="attr must exist.")
+        self.assertFalse(received_data)
 
 
 class TestEnumerations(unittest.TestCase):
