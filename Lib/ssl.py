@@ -1012,7 +1012,16 @@ class SSLSocket(socket):
                 # This prevents pending data sent to the socket before it was
                 # closed from escaping to the caller who could otherwise
                 # presume it came through a successful TLS connection.
-                raise SSLError("socket closed before TLS handshake with data in recv buffer.")
+                reason = "Closed before TLS handshake with data in recv buffer."
+                notconn_pre_handshake_data_error = SSLError(e.errno, reason)
+                # Add the SSLError attributes that _ssl.c always adds.
+                notconn_pre_handshake_data_error.reason = reason
+                notconn_pre_handshake_data_error.library = None
+                try:
+                    self.close()
+                except OSError:
+                    pass
+                raise notconn_pre_handshake_data_error
         else:
             connected = True
 
