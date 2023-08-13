@@ -10,6 +10,7 @@ from test.support import socket_helper
 from test.support import threading_helper
 from test.support import warnings_helper
 from test.support import asyncore
+import re
 import socket
 import select
 import struct
@@ -4718,14 +4719,22 @@ class TestPreHandshakeClose(unittest.TestCase):
                     except OSError:
                         pass  # closed, protocol error, etc.
 
-    def skip_on_non_linux_if_wrong_ssl_error(self, s_err):
-        if 'WRONG_VERSION_NUMBER' in s_err.reason and sys.platform != 'linux':
-            # If ssl_ctx.wrap_socket() winds up doing the actual wrapping we get
-            # an SSLError from OpenSSL, typically WRONG_VERSION_NUMBER. That is
-            # not what we're trying to test. The way this test is written is
-            # known to work on Linux. We skip the rest on other platforms if
-            # this happens. The important behavior of SSLError is confirmed.
-            self.skipTest(f"Failed to setup test condition on {sys.platform}.")
+    def non_linux_skip_if_wrong_error(self, err):
+        if sys.platform == "linux":
+            return  # Expect the full test setup to always work on Linux.
+        if (isinstance(err, ConnectionResetError) or
+            (isinstance(err, OSError) and err.errno == errno.EINVAL) or
+            re.search('wrong.version.number', getattr(err, "reason", ""), re.I)):
+            # On Windows the TCP RST leads to a ConnectionResetError
+            # (ECONNRESET) which Linux doesn't appear to surface to userspace.
+            # If wrap_socket() winds up on the "if connected:" path and doing
+            # the actual wrapping... we get an SSLError from OpenSSL. Typically
+            # WRONG_VERSION_NUMBER. While appropriate, neither is the scenario
+            # we're specifically trying to test. The way this test is written
+            # is known to work on Linux. We'll skip it anywhere else that it
+            # does not present as doing so.
+            self.skipTest(f"Could not recreate conditions on {sys.platform}:"
+                          f" {err=}")
 
     def test_preauth_data_to_tls_server(self):
         server_accept_called = threading.Event()
@@ -4754,12 +4763,13 @@ class TestPreHandshakeClose(unittest.TestCase):
         ready_for_server_wrap_socket.set()
         server.join()
         self.assertFalse(server.received_data)
+        self.assertIsInstance(server.wrap_error, OSError)  # All platforms.
+        self.non_linux_skip_if_wrong_error(server.wrap_error)
         self.assertIsInstance(server.wrap_error, ssl.SSLError)
-        self.skip_on_non_linux_if_wrong_ssl_error(server.wrap_error)
         self.assertIn("before TLS handshake with data", server.wrap_error.args[1])
         self.assertIn("before TLS handshake with data", server.wrap_error.reason)
         self.assertNotEqual(0, server.wrap_error.args[0])
-        self.assertIsNone(server.wrap_error.library, msg="attr must exist.")
+        self.assertIsNone(server.wrap_error.library, msg="attr must exist")
 
 
     def test_preauth_data_to_tls_client(self):
@@ -4799,13 +4809,14 @@ class TestPreHandshakeClose(unittest.TestCase):
                 received_data = tls_client.recv(400)
 
         server.join()
+        self.assertFalse(received_data)
+        self.assertIsInstance(wrap_error, OSError)  # All platforms.
+        self.non_linux_skip_if_wrong_error(wrap_error)
         self.assertIsInstance(wrap_error, ssl.SSLError)
-        self.skip_on_non_linux_if_wrong_ssl_error(wrap_error)
         self.assertIn("before TLS handshake with data", wrap_error.args[1])
         self.assertIn("before TLS handshake with data", wrap_error.reason)
         self.assertNotEqual(0, wrap_error.args[0])
-        self.assertIsNone(wrap_error.library, msg="attr must exist.")
-        self.assertFalse(received_data)
+        self.assertIsNone(wrap_error.library, msg="attr must exist")
 
 
 class TestEnumerations(unittest.TestCase):
