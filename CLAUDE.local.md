@@ -48,6 +48,7 @@ ONLY build outside of the main repo directory.
 * Setup: `mkdir "$BUILD_DIR" && (cd "$BUILD_DIR" && "$SRC_DIR"/configure --with-pydebug)`
 * `make -C "$BUILD_DIR" -j $(nproc)` will rebuild
 * Let `BUILT_PY="$BUILD_DIR"/python`
+* Add a ".exe" suffix to `BUILT_PY` when running on macOS (you can determine this via `uname`)
 
 ## Running our built Python and tests
 
@@ -58,6 +59,7 @@ ONLY build outside of the main repo directory.
 * `make -C "$BUILD_DIR" clinic` will regenerate argument clinic generated code. Do this after you've edited a corresponding input .c file in a way that changes a C extension module function signature or docstring
 * `make -C "$BUILD_DIR" test` will run the entire test suite. Do that sparingly via a sub-agent. focus on specific tests first and ask before running the entire test suite.
 * Some tests are packages rather than a single .py file. These require `load_tests()` logic in their `test_package/__init__.py` file in order to work via `$BUILT_PY -m test` commands.
+* To select specific tests when running some via `-m test` you can pass a `--match nameglob` pattern.
 
 ## Linting
 

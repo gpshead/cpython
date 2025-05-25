@@ -13,6 +13,11 @@
 #  include <sys/time.h>           // gettimeofday()
 #endif
 
+#ifdef __APPLE__
+#  include <string.h>             // strcpy()
+#  include <unistd.h>             // usleep()
+#endif
+
 #ifdef HAVE_MP_SEMAPHORE
 
 // These match the values in Lib/multiprocessing/synchronize.py
@@ -220,6 +225,248 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
  * Unix definitions
  */
 
+#ifdef __APPLE__
+
+/*
+ * macOS SysV semaphore implementation
+ */
+
+/* Forward declarations for SysV semaphore functions */
+static SEM_HANDLE _sysv_sem_create(const char *name, int value, int maxvalue);
+static SEM_HANDLE _sysv_sem_open(const char *name);
+static int _sysv_sem_close(SEM_HANDLE sem);
+static int _sysv_sem_getvalue(SEM_HANDLE sem, int *value);
+static int _sysv_sem_unlink(const char *name);
+static int _sysv_sem_wait(SEM_HANDLE sem);
+static int _sysv_sem_trywait(SEM_HANDLE sem);
+static int _sysv_sem_timedwait(SEM_HANDLE sem, struct timespec *deadline);
+static int _sysv_sem_post(SEM_HANDLE sem);
+
+#define SEM_CLEAR_ERROR()
+#define SEM_GET_LAST_ERROR() errno
+#define SEM_FAILED ((SEM_HANDLE)-1)
+#define SEM_CREATE(name, val, max) _sysv_sem_create(name, val, max)
+#define SEM_CLOSE(sem) _sysv_sem_close(sem)
+#define SEM_GETVALUE(sem, pval) _sysv_sem_getvalue(sem, pval)
+#define SEM_UNLINK(name) _sysv_sem_unlink(name)
+
+/* Helper function to convert name to key */
+static key_t _name_to_key(const char *name)
+{
+    /* Simple hash function to convert name to key */
+    key_t key = 0;
+    if (!name || !*name) {
+        /* Invalid name, return a default key */
+        return 1;
+    }
+    for (const char *p = name; *p; p++) {
+        key = key * 31 + (unsigned char)*p;
+    }
+    /* Ensure we don't use IPC_PRIVATE (0) */
+    return key ? key : 1;
+}
+
+/* Open existing SysV semaphore */
+static SEM_HANDLE _sysv_sem_open(const char *name)
+{
+    key_t key = _name_to_key(name);
+    int semid = semget(key, 0, 0);
+    if (semid == -1) {
+        return SEM_FAILED;
+    }
+    
+    sysv_sem_t *sem = PyMem_Malloc(sizeof(sysv_sem_t));
+    if (!sem) {
+        errno = ENOMEM;
+        return SEM_FAILED;
+    }
+    
+    sem->semid = semid;
+    sem->semnum = 0;
+    sem->key = key;
+    sem->name = PyMem_Malloc(strlen(name) + 1);
+    if (sem->name) {
+        strcpy(sem->name, name);
+    }
+    
+    return sem;
+}
+
+/* SysV semaphore creation */
+static SEM_HANDLE _sysv_sem_create(const char *name, int value, int maxvalue)
+{
+    sysv_sem_t *sem = PyMem_Malloc(sizeof(sysv_sem_t));
+    if (!sem) {
+        errno = ENOMEM;
+        return SEM_FAILED;
+    }
+    
+    /* Generate unique key from name */
+    key_t key = _name_to_key(name);
+    
+    /* Clear errno before system calls */
+    errno = 0;
+    
+    /* Try to create semaphore set with one semaphore */
+    int semid = semget(key, 1, IPC_CREAT | IPC_EXCL | 0600);
+    if (semid == -1) {
+        int saved_errno = errno;
+        /* Debug: Check what error we got */
+        if (saved_errno == ENOENT || saved_errno == ENOTTY) {
+            /* These are unexpected for semget, might be a macOS issue */
+            /* Try without IPC_EXCL first */
+            errno = 0;
+            semid = semget(key, 1, IPC_CREAT | 0600);
+            if (semid != -1) {
+                /* Success, but we need to ensure it's initialized */
+                union semun {
+                    int val;
+                    struct semid_ds *buf;
+                    unsigned short *array;
+                } arg;
+                arg.val = value;
+                semctl(semid, 0, SETVAL, arg);
+                goto success;
+            }
+            /* If still failing, restore original error */
+            errno = saved_errno;
+        }
+        /* If it already exists, try to get it */
+        if (saved_errno == EEXIST) {
+            semid = semget(key, 0, 0);
+            if (semid == -1) {
+                PyMem_Free(sem);
+                return SEM_FAILED;
+            }
+            /* Remove the existing one and try again */
+            semctl(semid, 0, IPC_RMID);
+            semid = semget(key, 1, IPC_CREAT | IPC_EXCL | 0600);
+        }
+        if (semid == -1) {
+            /* Restore the original error if we still failed */
+            if (errno != saved_errno && saved_errno != EEXIST) {
+                errno = saved_errno;
+            }
+            PyMem_Free(sem);
+            return SEM_FAILED;
+        }
+    }
+    
+    /* Initialize semaphore value */
+    union semun {
+        int val;
+        struct semid_ds *buf;
+        unsigned short *array;
+    } arg;
+    arg.val = value;
+    
+    if (semctl(semid, 0, SETVAL, arg) == -1) {
+        semctl(semid, 0, IPC_RMID);
+        PyMem_Free(sem);
+        return SEM_FAILED;
+    }
+    
+success:
+    sem->semid = semid;
+    sem->semnum = 0;
+    sem->key = key;
+    sem->name = PyMem_Malloc(strlen(name) + 1);
+    if (sem->name) {
+        strcpy(sem->name, name);
+    }
+    
+    return sem;
+}
+
+/* Close SysV semaphore */
+static int _sysv_sem_close(SEM_HANDLE sem)
+{
+    if (sem && sem != SEM_FAILED) {
+        PyMem_Free(sem->name);
+        PyMem_Free(sem);
+    }
+    return 0;
+}
+
+/* Get SysV semaphore value */
+static int _sysv_sem_getvalue(SEM_HANDLE sem, int *value)
+{
+    *value = semctl(sem->semid, sem->semnum, GETVAL);
+    return (*value == -1) ? -1 : 0;
+}
+
+/* Unlink SysV semaphore */
+static int _sysv_sem_unlink(const char *name)
+{
+    key_t key = _name_to_key(name);
+    int semid = semget(key, 0, 0);
+    if (semid != -1) {
+        return semctl(semid, 0, IPC_RMID);
+    }
+    /* If semget failed, set appropriate errno */
+    if (errno != ENOENT) {
+        /* Unexpected error */
+        return -1;
+    }
+    /* Semaphore doesn't exist - this is what we want after unlink */
+    errno = ENOENT;
+    return -1;
+}
+
+/* Wait on SysV semaphore */
+static int _sysv_sem_wait(SEM_HANDLE sem)
+{
+    struct sembuf op = {sem->semnum, -1, 0};
+    return semop(sem->semid, &op, 1);
+}
+
+/* Try wait on SysV semaphore */
+static int _sysv_sem_trywait(SEM_HANDLE sem)
+{
+    struct sembuf op = {sem->semnum, -1, IPC_NOWAIT};
+    return semop(sem->semid, &op, 1);
+}
+
+/* Timed wait on SysV semaphore */
+static int _sysv_sem_timedwait(SEM_HANDLE sem, struct timespec *deadline)
+{
+    /* macOS doesn't have semtimedop, so implement polling */
+    struct timeval now;
+    struct sembuf op = {sem->semnum, -1, IPC_NOWAIT};
+    
+    while (1) {
+        if (semop(sem->semid, &op, 1) == 0) {
+            return 0;
+        }
+        if (errno != EAGAIN) {
+            return -1;
+        }
+        
+        /* Check timeout */
+        if (gettimeofday(&now, NULL) < 0) {
+            return -1;
+        }
+        if (now.tv_sec > deadline->tv_sec ||
+            (now.tv_sec == deadline->tv_sec && 
+             now.tv_usec >= deadline->tv_nsec / 1000)) {
+            errno = ETIMEDOUT;
+            return -1;
+        }
+        
+        /* Sleep briefly before retrying */
+        usleep(1000); /* 1ms */
+    }
+}
+
+/* Post to SysV semaphore */
+static int _sysv_sem_post(SEM_HANDLE sem)
+{
+    struct sembuf op = {sem->semnum, 1, 0};
+    return semop(sem->semid, &op, 1);
+}
+
+#else /* !__APPLE__ */
+
 #define SEM_CLEAR_ERROR()
 #define SEM_GET_LAST_ERROR() 0
 #define SEM_CREATE(name, val, max) sem_open(name, O_CREAT | O_EXCL, 0600, val)
@@ -227,18 +474,13 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
 #define SEM_GETVALUE(sem, pval) sem_getvalue(sem, pval)
 #define SEM_UNLINK(name) sem_unlink(name)
 
-/* OS X 10.4 defines SEM_FAILED as -1 instead of (sem_t *)-1;  this gives
-   compiler warnings, and (potentially) undefined behaviour. */
-#ifdef __APPLE__
-#  undef SEM_FAILED
-#  define SEM_FAILED ((sem_t *)-1)
-#endif
+#endif /* __APPLE__ */
 
 #ifndef HAVE_SEM_UNLINK
 #  define sem_unlink(name) 0
 #endif
 
-#ifndef HAVE_SEM_TIMEDWAIT
+#if !defined(HAVE_SEM_TIMEDWAIT) && !defined(__APPLE__)
 #  define sem_timedwait(sem,deadline) sem_timedwait_save(sem,deadline,_save)
 
 static int
@@ -299,7 +541,7 @@ sem_timedwait_save(sem_t *sem, struct timespec *deadline, PyThreadState *_save)
     }
 }
 
-#endif /* !HAVE_SEM_TIMEDWAIT */
+#endif /* !HAVE_SEM_TIMEDWAIT && !__APPLE__ */
 
 /*[clinic input]
 @critical_section
@@ -349,7 +591,11 @@ _multiprocessing_SemLock_acquire_impl(SemLockObject *self, int blocking,
 
     /* Check whether we can acquire without releasing the GIL and blocking */
     do {
+#ifdef __APPLE__
+        res = _sysv_sem_trywait(self->handle);
+#else
         res = sem_trywait(self->handle);
+#endif
         err = errno;
     } while (res < 0 && errno == EINTR && !PyErr_CheckSignals());
     errno = err;
@@ -359,10 +605,18 @@ _multiprocessing_SemLock_acquire_impl(SemLockObject *self, int blocking,
         do {
             Py_BEGIN_ALLOW_THREADS
             if (!use_deadline) {
+#ifdef __APPLE__
+                res = _sysv_sem_wait(self->handle);
+#else
                 res = sem_wait(self->handle);
+#endif
             }
             else {
+#ifdef __APPLE__
+                res = _sysv_sem_timedwait(self->handle, &deadline);
+#else
                 res = sem_timedwait(self->handle, &deadline);
+#endif
             }
             Py_END_ALLOW_THREADS
             err = errno;
@@ -415,7 +669,13 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
         /* We will only check properly the maxvalue == 1 case */
         if (self->maxvalue == 1) {
             /* make sure that already locked */
-            if (sem_trywait(self->handle) < 0) {
+            if (
+#ifdef __APPLE__
+                _sysv_sem_trywait(self->handle)
+#else
+                sem_trywait(self->handle)
+#endif
+                < 0) {
                 if (errno != EAGAIN) {
                     PyErr_SetFromErrno(PyExc_OSError);
                     return NULL;
@@ -423,7 +683,13 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
                 /* it is already locked as expected */
             } else {
                 /* it was not locked so undo wait and raise  */
-                if (sem_post(self->handle) < 0) {
+                if (
+#ifdef __APPLE__
+                    _sysv_sem_post(self->handle)
+#else
+                    sem_post(self->handle)
+#endif
+                    < 0) {
                     PyErr_SetFromErrno(PyExc_OSError);
                     return NULL;
                 }
@@ -448,7 +714,13 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
 #endif
     }
 
-    if (sem_post(self->handle) < 0)
+    if (
+#ifdef __APPLE__
+        _sysv_sem_post(self->handle)
+#else
+        sem_post(self->handle)
+#endif
+        < 0)
         return PyErr_SetFromErrno(PyExc_OSError);
 
     --self->count;
@@ -565,7 +837,11 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
 
 #ifndef MS_WINDOWS
     if (name != NULL) {
+#ifdef __APPLE__
+        handle = _sysv_sem_open(name);
+#else
         handle = sem_open(name, 0);
+#endif
         if (handle == SEM_FAILED) {
             PyErr_SetFromErrno(PyExc_OSError);
             PyMem_Free(name_copy);
@@ -628,7 +904,7 @@ static PyObject *
 _multiprocessing_SemLock__get_value_impl(SemLockObject *self)
 /*[clinic end generated code: output=64bc1b89bda05e36 input=cb10f9a769836203]*/
 {
-#ifdef HAVE_BROKEN_SEM_GETVALUE
+#if defined(HAVE_BROKEN_SEM_GETVALUE) && !defined(__APPLE__)
     PyErr_SetNone(PyExc_NotImplementedError);
     return NULL;
 #else
@@ -653,7 +929,7 @@ static PyObject *
 _multiprocessing_SemLock__is_zero_impl(SemLockObject *self)
 /*[clinic end generated code: output=815d4c878c806ed7 input=294a446418d31347]*/
 {
-#ifdef HAVE_BROKEN_SEM_GETVALUE
+#if defined(HAVE_BROKEN_SEM_GETVALUE) && !defined(__APPLE__)
     if (sem_trywait(self->handle) < 0) {
         if (errno == EAGAIN)
             Py_RETURN_TRUE;

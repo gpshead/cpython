@@ -33,7 +33,21 @@
 #  define HAVE_MP_SEMAPHORE
 #else
 #  include <fcntl.h>                 /* O_CREAT and O_EXCL */
-#  if defined(HAVE_SEM_OPEN) && !defined(POSIX_SEMAPHORES_NOT_ENABLED)
+#  ifdef __APPLE__
+     /* Use SysV semaphores on macOS to avoid sem_getvalue issues */
+#    include <sys/sem.h>
+#    include <sys/ipc.h>
+#    include <sys/stat.h>
+#    include <sys/time.h>            /* for gettimeofday */
+#    define HAVE_MP_SEMAPHORE
+     typedef struct {
+         int semid;      /* SysV semaphore set ID */
+         int semnum;     /* Semaphore number within the set (always 0) */
+         key_t key;      /* IPC key for the semaphore */
+         char *name;     /* Original name for cleanup */
+     } sysv_sem_t;
+     typedef sysv_sem_t *SEM_HANDLE;
+#  elif defined(HAVE_SEM_OPEN) && !defined(POSIX_SEMAPHORES_NOT_ENABLED)
 #    define HAVE_MP_SEMAPHORE
 #    include <semaphore.h>
      typedef sem_t *SEM_HANDLE;
