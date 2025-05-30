@@ -33,6 +33,7 @@ for i in range(0x20):
 del i
 
 INFINITY = float('inf')
+_RECURSION_EXCEPTION_NOTES_LIMIT = 5
 
 def py_encode_basestring(s):
     """Return a JSON representation of a Python string
@@ -208,7 +209,20 @@ class JSONEncoder(object):
             if self.check_circular:
                 err = ValueError("Circular reference detected")
                 if notes := getattr(exc, "__notes__", None):
-                    err.__notes__ = notes
+                    # Filter notes to avoid explosion of redundant messages
+                    unique_notes = []
+                    seen = set()
+                    for note in notes:
+                        if note not in seen and len(unique_notes) < _RECURSION_EXCEPTION_NOTES_LIMIT:
+                            unique_notes.append(note)
+                            seen.add(note)
+
+                    if unique_notes:
+                        err.__notes__ = unique_notes
+                        # Add summary if we truncated many notes
+                        if len(notes) > len(unique_notes):
+                            truncated_count = len(notes) - len(unique_notes)
+                            err.__notes__.append(f"... (truncated {truncated_count} similar messages)")
                 raise err
             raise
         return ''.join(chunks)
@@ -440,6 +454,10 @@ def _make_iterencode(markers, _default, _encoder, _indent, _floatstr,
             except GeneratorExit:
                 raise
             except BaseException as exc:
-                exc.add_note(f'when serializing {type(o).__name__} object')
+                note = f'when serializing {type(o).__name__} object'
+                existing_notes = getattr(exc, '__notes__', [])
+                # Only add if it's different from the last note to prevent duplication
+                if not existing_notes or existing_notes[-1] != note:
+                    exc.add_note(note)
                 raise
     return _iterencode

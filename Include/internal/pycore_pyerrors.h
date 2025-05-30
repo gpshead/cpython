@@ -29,10 +29,6 @@ PyAPI_FUNC(PyObject*) _PyErr_FormatFromCause(
     ...
     );
 
-extern int _PyException_AddNote(
-     PyObject *exc,
-     PyObject *note);
-
 extern int _PyErr_CheckSignals(void);
 
 /* Support for adding program text to SyntaxErrors */
@@ -188,6 +184,9 @@ PyAPI_FUNC(Py_ssize_t) _Py_UTF8_Edit_Cost(PyObject *str_a, PyObject *str_b,
 
 // Export for '_json' shared extension
 PyAPI_FUNC(void) _PyErr_FormatNote(const char *format, ...);
+PyAPI_FUNC(int) _PyException_AddNote(
+     PyObject *exc,
+     PyObject *note);
 
 /* Context manipulation (PEP 3134) */
 

@@ -1534,7 +1534,42 @@ encoder_listencode_obj(PyEncoderObject *s, PyUnicodeWriter *writer,
 
         Py_DECREF(newobj);
         if (rv) {
-            _PyErr_FormatNote("when serializing %T object", obj);
+            // Check for exception note duplication to prevent redundant messages
+            PyObject *exc = PyErr_GetRaisedException();
+            if (exc != NULL) {
+                // Create the new note
+                PyObject *new_note = PyUnicode_FromFormat("when serializing %T object", obj);
+                if (new_note == NULL) {
+                    PyErr_SetRaisedException(exc);
+                    return -1;
+                }
+
+                // Get existing notes
+                PyObject *notes = NULL;
+                if (PyObject_GetOptionalAttr(exc, &_Py_ID(__notes__), &notes) < 0) {
+                    _PyException_AddNote(exc, new_note);
+                    Py_DECREF(new_note);
+                    PyErr_SetRaisedException(exc);
+                    return -1;
+                }
+
+                // Only add if different from last note or if no notes exist
+                int should_add = 1;
+                if (notes != NULL && PyList_Check(notes) && PyList_GET_SIZE(notes) > 0) {
+                    PyObject *last_note = PyList_GET_ITEM(notes, PyList_GET_SIZE(notes) - 1);
+                    if (PyUnicode_Check(last_note) && PyUnicode_Compare(last_note, new_note) == 0) {
+                        should_add = 0;
+                    }
+                }
+
+                if (should_add) {
+                    _PyException_AddNote(exc, new_note);
+                }
+
+                Py_DECREF(new_note);
+                Py_XDECREF(notes);
+                PyErr_SetRaisedException(exc);
+            }
             return -1;
         }
         return rv;
