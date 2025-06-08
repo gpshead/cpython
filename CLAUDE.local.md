@@ -11,10 +11,13 @@ lines with a tool before deciding strategically if you should read an entire
 file.  Changes will be often focused on specific areas of files instead of
 needing the entire thing in context.
 
+If tools such as ripgrep `rg`, `gh`, `jq`, or `pre-commit` are not found
+when desired, ask the user to install them.
+
 # Expanding your knowledge
 
 * ALWAYS load a `.claude/pr-{PR_NUMBER}.md` or `.claude/branch-{branch_name_without_slashes}.md` file when you are told a PR number or when the current git branch is not `main`.
-* Keep such a file up to date as an engineering notebook of your learnings and project state as you work on a task to make it easier to pick up and resume work later.
+* Keep such a file up to date as an engineering notebook of your learnings and project state as you work on a task and after you commit. The goal of our notebook is to make it easier to pick up and resume work later.
 
 ## Optional developer guides
 
@@ -34,7 +37,7 @@ needing the entire thing in context.
    * `Lib/test/test_csv.py` are tests for `csv`
 * C header files are in the `Include/` tree
 * Documentation is written in .rst format in `Doc/`
-* Build time tools such as Argument Clinic live under the `Tools/` tree.
+* Build time tools such as Argument Clinic live under the `Tools/` tree
 
 ## Coding style
 
@@ -69,13 +72,14 @@ ONLY build outside of the main repo directory.
 
 ## Scratch space
 
-* NEVER create throw away idea exploration files in the top directory of the repo. Use a `.claude/sandbox/` directory for those. They will never be committed
+* NEVER create throw away idea exploration files in the top directory of the repo. Use a `.claude/sandbox/` directory for those. They will never be committed.
 
 ## Linting
 
-* Use sub-agents when running these steps.
-* `make -C "$BUILD_DIR" patchcheck` should be made to pass before committing.
-* For documentation changes `make -C Doc check`
+* `pre-commit run --all-files` will help you.
+* Use sub-agents when running these steps:
+ * `make -C "$BUILD_DIR" patchcheck` should be made to pass before committing.
+ * For documentation changes `make -C Doc check`
 
 # Guiding Mantras
 
