@@ -717,6 +717,44 @@ class TestNamedTuple(unittest.TestCase):
         self.assertIs(type(a), Group)
         self.assertEqual(a, (1, [2]))
 
+    def test_replace_method_opt_in(self):
+        # Test that replace method is NOT available by default
+        Point = namedtuple('Point', 'x y')
+        p = Point(11, 22)
+        self.assertFalse(hasattr(p, 'replace'))
+        self.assertTrue(hasattr(p, '_replace'))
+
+        # Test that replace method IS available when with_replace_method=True
+        PointWithReplace = namedtuple('PointWithReplace', 'x y', with_replace_method=True)
+        pr = PointWithReplace(11, 22)
+        self.assertTrue(hasattr(pr, 'replace'))
+        self.assertTrue(hasattr(pr, '_replace'))
+
+        # Test that both methods work identically
+        self.assertEqual(pr.replace(x=100), (100, 22))
+        self.assertEqual(pr._replace(x=100), (100, 22))
+        self.assertEqual(pr.replace(x=100), pr._replace(x=100))
+
+        # Test that replace method works with keyword arguments
+        self.assertEqual(pr.replace(x=5, y=10), (5, 10))
+        self.assertEqual(pr.replace(y=99), (11, 99))
+
+        # Test error handling - invalid field name
+        with self.assertRaises(TypeError):
+            pr.replace(invalid_field=123)
+
+        # Test validation - cannot have field named "replace" with with_replace_method=True
+        with self.assertRaises(ValueError) as cm:
+            namedtuple('BadTuple', ['x', 'replace', 'y'], with_replace_method=True)
+        self.assertIn('Cannot use with_replace_method=True', str(cm.exception))
+        self.assertIn('field named "replace"', str(cm.exception))
+
+        # Test that field named "replace" works fine without with_replace_method
+        GoodTuple = namedtuple('GoodTuple', ['x', 'replace', 'y'])
+        gt = GoodTuple(1, 2, 3)
+        self.assertEqual(gt.replace, 2)  # Field access works
+        self.assertTrue(hasattr(gt, '_replace'))  # _replace method still exists
+
 
 ################################################################################
 ### Abstract Base Classes

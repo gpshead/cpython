@@ -844,7 +844,7 @@ Named tuples assign meaning to each position in a tuple and allow for more reada
 self-documenting code.  They can be used wherever regular tuples are used, and
 they add the ability to access fields by name instead of position index.
 
-.. function:: namedtuple(typename, field_names, *, rename=False, defaults=None, module=None)
+.. function:: namedtuple(typename, field_names, *, rename=False, defaults=None, module=None, with_replace_method=False)
 
     Returns a new tuple subclass named *typename*.  The new subclass is used to
     create tuple-like objects that have fields accessible by attribute lookup as
@@ -878,6 +878,12 @@ they add the ability to access fields by name instead of position index.
     If *module* is defined, the :attr:`~type.__module__` attribute of the
     named tuple is set to that value.
 
+    If *with_replace_method* is true, the named tuple will have a public
+    :meth:`replace` method as an alias to the private :meth:`_replace` method.
+    This provides a :pep:`8` friendly API for creating modified copies of named
+    tuple instances. This is useful for namedtuples that do not have a field
+    named ``replace`` and are never expected to gain one in the future.
+
     Named tuple instances do not have per-instance dictionaries, so they are
     lightweight and require no more memory than regular tuples.
 
@@ -901,6 +907,9 @@ they add the ability to access fields by name instead of position index.
        Added the *defaults* parameter and the :attr:`~somenamedtuple._field_defaults`
        attribute.
 
+    .. versionadded:: next
+       Added the *with_replace_method* parameter.
+
 .. doctest::
     :options: +NORMALIZE_WHITESPACE
 
@@ -916,6 +925,12 @@ they add the ability to access fields by name instead of position index.
     33
     >>> p                       # readable __repr__ with a name=value style
     Point(x=11, y=22)
+
+    >>> # Example with public replace method
+    >>> Point = namedtuple('Point', ['x', 'y'], with_replace_method=True)
+    >>> p = Point(11, 22)
+    >>> p.replace(x=100)        # public replace method when enabled
+    Point(x=100, y=22)
 
 Named tuples are especially useful for assigning field names to result tuples returned
 by the :mod:`csv` or :mod:`sqlite3` modules::

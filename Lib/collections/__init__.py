@@ -358,7 +358,7 @@ try:
 except ImportError:
     _tuplegetter = lambda index, doc: property(_itemgetter(index), doc=doc)
 
-def namedtuple(typename, field_names, *, rename=False, defaults=None, module=None):
+def namedtuple(typename, field_names, *, rename=False, defaults=None, module=None, with_replace_method=False):
     """Returns a new subclass of tuple with named fields.
 
     >>> Point = namedtuple('Point', ['x', 'y'])
@@ -378,6 +378,13 @@ def namedtuple(typename, field_names, *, rename=False, defaults=None, module=Non
     >>> Point(**d)                      # convert from a dictionary
     Point(x=11, y=22)
     >>> p._replace(x=100)               # _replace() is like str.replace() but targets named fields
+    Point(x=100, y=22)
+
+    The 'with_replace_method' parameter adds a public 'replace' method as an alias to '_replace':
+
+    >>> Point = namedtuple('Point', ['x', 'y'], with_replace_method=True)
+    >>> p = Point(11, 22)
+    >>> p.replace(x=100)                # public replace method when enabled
     Point(x=100, y=22)
 
     """
@@ -425,6 +432,11 @@ def namedtuple(typename, field_names, *, rename=False, defaults=None, module=Non
             raise TypeError('Got more default values than field names')
         field_defaults = dict(reversed(list(zip(reversed(field_names),
                                                 reversed(defaults)))))
+
+    # Check for conflicting field names when with_replace_method is enabled
+    if with_replace_method and 'replace' in field_names:
+        raise ValueError('Cannot use with_replace_method=True when '
+                         f'a field named "replace" exists: {field_names!r}')
 
     # Variables used in the methods and docstrings
     field_names = tuple(map(_sys.intern, field_names))
@@ -508,6 +520,8 @@ def namedtuple(typename, field_names, *, rename=False, defaults=None, module=Non
         '__getnewargs__': __getnewargs__,
         '__match_args__': field_names,
     }
+    if with_replace_method:
+        class_namespace['replace'] = _replace
     for index, name in enumerate(field_names):
         doc = _sys.intern(f'Alias for field number {index}')
         class_namespace[name] = _tuplegetter(index, doc)
