@@ -1,18 +1,15 @@
-# Welcome to the team!
+# Context
 
-You are helping a CPython core team member work on the implementation of the
-Python language runtime and standard library itself.
+You are in the CPython repo helping work on the implementation of the Python
+language runtime and standard library itself.
 
 Use tools like `gh` to get information about an issue or PR in the repo.
 Including using the GraphQL API via `gh` when appropriate.
 
-Source files in this repo can be very long.  Check their size or number of
-lines with a tool before deciding strategically if you should read an entire
-file.  Changes will be often focused on specific areas of files instead of
-needing the entire thing in context.
+Source files in this repo can be very long.  Check their size to consider if
+you really need to read the entire thing.
 
-If tools such as ripgrep `rg`, `gh`, `jq`, or `pre-commit` are not found
-when desired, ask the user to install them.
+If tools such as ripgrep `rg`, `gh`, `jq`, or `pre-commit` are not found, ask the user to install them.
 
 # Expanding your knowledge
 
@@ -53,22 +50,23 @@ when desired, ask the user to install them.
 ONLY build outside of the main repo directory.
 
 * Use sub-agents when running configure and make build steps
-* let `SRC_DIR=$(pwd)` and `BUILD_DIR="$SRC_DIR"/../b/`
-* Setup: `mkdir "$BUILD_DIR" && (cd "$BUILD_DIR" && "$SRC_DIR"/configure --with-pydebug)`
-* `make -C "$BUILD_DIR" -j $(nproc)` will rebuild
-* Let `BUILT_PY="$BUILD_DIR"/python`
+* `REPO_ROOT` is the root of the cpython git repo
+* let `BUILD_DIR=REPO_ROOT/build`
+* Setup: `cd BUILD_DIR && ../configure --with-pydebug`
+* `make -C BUILD_DIR -j $(nproc)` will rebuild
+* Let `BUILT_PY=BUILD_DIR/python` (or `BUILD_DIR/python.exe` on macOS)
 
 ## Running our built Python and tests
 
 * ALWAYS use sub-agents when running tests
 * NEVER use `pytest`. CPython tests are `unittest` based.
-* `"$BUILT_PY"` will run the interpreter we've built
-* Individual test files can be run directly using `"$BUILT_PY" Lib/test/test_csv.py`
-* `"$BUILT_PY" -m test test_zipfile -j $(nproc)` will properly run all `Lib/test/test_zipfile` tests
-* `"$BUILT_PY" -m test` supports a `--match TESTNAME_GLOB` flag to run specific tests, pass `--help` to learn its other capabilities.
-* `make -C "$BUILD_DIR" clinic` will regenerate argument clinic generated code. Do this after you've edited a corresponding input .c file in a way that changes a C extension module function signature or docstring
-* `make -C "$BUILD_DIR" test` will run the entire test suite. Do that sparingly. Focus on specific tests first and ask before running the entire test suite.
-* Some tests are packages rather than a single .py file. These require `load_tests()` logic in their `test_package/__init__.py` file in order to work via `$BUILT_PY -m test` commands.
+* use `BUILT_PY` to run the interpreter we've built
+* Individual test files can be run directly using `BUILT_PY Lib/test/test_csv.py`
+* `BUILT_PY -m test test_zipfile -j $(nproc)` will properly run all `Lib/test/test_zipfile` tests
+* `BUILT_PY -m test` supports a `--match TESTNAME_GLOB` flag to run specific tests, pass `--help` to learn its other capabilities.
+* `make -C BUILD_DIR clinic` will regenerate argument clinic generated code. Do this after you've edited a corresponding input .c file in a way that changes a C extension module function signature or docstring
+* `make -C BUILD_DIR test` will run the entire test suite. Do that sparingly. Focus on specific tests first and ask before running the entire test suite.
+* Some tests are packages rather than a single .py file. These require `load_tests()` logic in their `test_package/__init__.py` file in order to work via `BUILT_PY -m test` commands.
 
 ## Scratch space
 
@@ -78,9 +76,6 @@ ONLY build outside of the main repo directory.
 
 * `pre-commit run --all-files` will help you.
 * Use sub-agents when running these steps:
- * `make -C "$BUILD_DIR" patchcheck` should be made to pass before committing.
+ * `make -C BUILD_DIR patchcheck` should be made to pass before committing.
  * For documentation changes `make -C Doc check`
 
-# Guiding Mantras
-
-Use extended thinking when you feel unsure.  Ask questions when you are still not confident.
