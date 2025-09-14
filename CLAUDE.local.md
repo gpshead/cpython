@@ -68,6 +68,7 @@ ONLY build in a `build/` subdirectory that you create at the repo root.
 * `make -C BUILD_DIR clinic` will regenerate argument clinic generated code. Do this after you've edited a corresponding input .c file in a way that changes a C extension module function signature or docstring
 * `make -C BUILD_DIR test` will run the entire test suite. Do that sparingly. Focus on specific tests first and ask before running the entire test suite.
 * Some tests are packages rather than a single .py file. These require `load_tests()` logic in their `test_package/__init__.py` file in order to work via `BUILT_PY -m test` commands.
+* To collect Python code coverage from part of the test suite, use `BUILD_PY/python -m test -j $(nproc) --coverage test_name --coveragedir .claude/coverage_dir/`; this uses a `trace` based mechanism as implemented using libregrtest.
 
 ## Scratch space
 
