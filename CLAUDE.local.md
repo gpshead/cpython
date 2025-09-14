@@ -71,6 +71,10 @@ ONLY build in a `build/` subdirectory that you create at the repo root.
 * Some tests are packages rather than a single .py file. These require `load_tests()` logic in their `test_package/__init__.py` file in order to work via `BUILT_PY -m test` commands.
 * To collect Python code coverage from part of the test suite, use `BUILD_PY/python -m test -j $(nproc) --coverage test_name --coveragedir .claude/coverage_dir/`; this uses a `trace` based mechanism as implemented using libregrtest.
 
+### Debugging
+
+* For interactive debugging using tools like pdb, lldb, or gdb and when working on an interactive feature such as the REPL: spawn and control a tmux session to drive that.  Always clean up your tmux sessions when you are done with them.
+
 ## Scratch space
 
 * NEVER create throw away idea exploration files in the top directory of the repo. Use a `.claude/sandbox/` directory for those. They will never be committed.
