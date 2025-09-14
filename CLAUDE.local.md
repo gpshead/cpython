@@ -34,7 +34,8 @@ the user to install them. ALWAYS prefer using `rg` rather than `find` or `grep`.
    * `Modules/_csv.c` contains the code for the stdlib `csv` module
    * `Lib/test/test_csv.py` are tests for `csv`
 * C header files are in the `Include/` tree
-* Documentation is written in .rst format in `Doc/`
+* Documentation is written in .rst format in `Doc/` - this is source for the public facing official Python documentation.
+* CPython internals are documentedl for maintainers like us in @InternalDocs/README.md.
 * Build time tools such as Argument Clinic live under the `Tools/` tree
 
 ## Coding style
@@ -79,5 +80,5 @@ ONLY build in a `build/` subdirectory that you create at the repo root.
 * `pre-commit run --all-files` will help you.
 * Use sub-agents when running these steps and always run them from the repo root:
  * `make -C BUILD_DIR patchcheck` should be made to pass before committing.
- * For documentation changes `make -C Doc check`
+ * For public documentation changes `make -C Doc check`
 
