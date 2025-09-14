@@ -3,18 +3,19 @@
 You are in the CPython repo helping work on the implementation of the Python
 language runtime and standard library itself.
 
-Use tools like `gh` to get information about an issue or PR in the repo.
+Use the `gh` tool to get information about an issue or PR in the repo.
 Including using the GraphQL API via `gh` when appropriate.
 
 Source files in this repo can be very long.  Check their size to consider if
 you really need to read the entire thing.
 
-If tools such as ripgrep `rg`, `gh`, `jq`, or `pre-commit` are not found, ask the user to install them.
+If tools such as `rg` (ripgrep), `gh`, `jq`, or `pre-commit` are not found, ask
+the user to install them. ALWAYS prefer using `rg` rather than `find` or `grep`.
 
 # Expanding your knowledge
 
 * ALWAYS load a `.claude/pr-{PR_NUMBER}.md` or `.claude/branch-{branch_name_without_slashes}.md` file when you are told a PR number or when the current git branch is not `main`.
-* Keep such a file up to date as an engineering notebook of your learnings and project state as you work on a task and after you commit. The goal of our notebook is to make it easier to pick up and resume work later.
+* Keep the file up to date as an engineering notebook of your learnings and project state as you work on a task and after you commit. The goal of our notebook is to make it easier to pick up and resume work later.
 
 ## Optional developer guides
 
@@ -47,14 +48,14 @@ If tools such as ripgrep `rg`, `gh`, `jq`, or `pre-commit` are not found, ask th
 
 ## Building
 
-ONLY build outside of the main repo directory.
+ONLY build in a `build/` subdirectory that you create at the repo root.
 
 * Use sub-agents when running configure and make build steps
 * `REPO_ROOT` is the root of the cpython git repo
 * let `BUILD_DIR=REPO_ROOT/build`
 * Setup: `cd BUILD_DIR && ../configure --with-pydebug`
 * `make -C BUILD_DIR -j $(nproc)` will rebuild
-* Let `BUILT_PY=BUILD_DIR/python` (or `BUILD_DIR/python.exe` on macOS)
+* Check what OS you are running on. Let `BUILT_PY=BUILD_DIR/python` or `BUILD_DIR/python.exe` on macOS.
 
 ## Running our built Python and tests
 
@@ -63,7 +64,7 @@ ONLY build outside of the main repo directory.
 * use `BUILT_PY` to run the interpreter we've built
 * Individual test files can be run directly using `BUILT_PY Lib/test/test_csv.py`
 * `BUILT_PY -m test test_zipfile -j $(nproc)` will properly run all `Lib/test/test_zipfile` tests
-* `BUILT_PY -m test` supports a `--match TESTNAME_GLOB` flag to run specific tests, pass `--help` to learn its other capabilities.
+* `BUILT_PY -m test` supports a `--match TESTNAME_GLOB` flag to run specific tests, pass `--help` to learn its other capabilities.  NEVER try to pass `-k` as this is not pytest based, use `--match` instead.
 * `make -C BUILD_DIR clinic` will regenerate argument clinic generated code. Do this after you've edited a corresponding input .c file in a way that changes a C extension module function signature or docstring
 * `make -C BUILD_DIR test` will run the entire test suite. Do that sparingly. Focus on specific tests first and ask before running the entire test suite.
 * Some tests are packages rather than a single .py file. These require `load_tests()` logic in their `test_package/__init__.py` file in order to work via `BUILT_PY -m test` commands.
@@ -75,7 +76,7 @@ ONLY build outside of the main repo directory.
 ## Linting
 
 * `pre-commit run --all-files` will help you.
-* Use sub-agents when running these steps:
+* Use sub-agents when running these steps and always run them from the repo root:
  * `make -C BUILD_DIR patchcheck` should be made to pass before committing.
  * For documentation changes `make -C Doc check`
 
