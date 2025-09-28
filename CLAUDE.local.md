@@ -17,9 +17,10 @@ the user to install them. ALWAYS prefer using `rg` rather than `find` or `grep`.
 * ALWAYS load a `.claude/pr-{PR_NUMBER}.md` or `.claude/branch-{branch_name_without_slashes}.md` file when you are told a PR number or when the current git branch is not `main`.
 * Keep the file up to date as an engineering notebook of your learnings and project state as you work on a task and after you commit. The goal of our notebook is to make it easier to pick up and resume work later.
 
-## Optional developer guides
+## Optional developer guides and PEPs
 
-* If these exist: `../devguide/developer-workflow/` and `../devguide/documentation/` they contain further detailed documentation on how we like to work on code and docs in this codebase.
+* If `REPO_ROOT/../devguide/` exists, its `developer-workflow/` and `documentation/` subdirs contain detailed info on how we like to work on code and docs.
+* PEPs might exist in a `REPO_ROOT/../peps/` tree.
 
 # Source code
 
@@ -35,12 +36,12 @@ the user to install them. ALWAYS prefer using `rg` rather than `find` or `grep`.
    * `Lib/test/test_csv.py` are tests for `csv`
 * C header files are in the `Include/` tree
 * Documentation is written in .rst format in `Doc/` - this is source for the public facing official Python documentation.
-* CPython internals are documentedl for maintainers like us in @InternalDocs/README.md.
+* CPython internals are documented for maintainers in @InternalDocs/README.md.
 * Build time tools such as Argument Clinic live under the `Tools/` tree
 
 ## Coding style
 
-* For C, follow https://peps.python.org/pep-0007/. For Python, follow PEP-8.
+* For C, follow PEP-7. For Python, follow PEP-8.
 * Be consistent with existing nearby code style unless asked to do otherwise.
 * NEVER leave trailing whitespace on any line.
 * ALWAYS preserve the newline at the end of files.
@@ -57,6 +58,7 @@ ONLY build in a `build/` subdirectory that you create at the repo root.
 * Setup: `cd BUILD_DIR && ../configure --with-pydebug`
 * `make -C BUILD_DIR -j $(nproc)` will rebuild
 * Check what OS you are running on. Let `BUILT_PY=BUILD_DIR/python` or `BUILD_DIR/python.exe` on macOS.
+* If you are on Windows, ask the user how to build.
 
 ## Running our built Python and tests
 
@@ -69,11 +71,11 @@ ONLY build in a `build/` subdirectory that you create at the repo root.
 * `make -C BUILD_DIR clinic` will regenerate argument clinic generated code. Do this after you've edited a corresponding input .c file in a way that changes a C extension module function signature or docstring
 * `make -C BUILD_DIR test` will run the entire test suite. Do that sparingly. Focus on specific tests first and ask before running the entire test suite.
 * Some tests are packages rather than a single .py file. These require `load_tests()` logic in their `test_package/__init__.py` file in order to work via `BUILT_PY -m test` commands.
-* To collect Python code coverage from part of the test suite, use `BUILD_PY/python -m test -j $(nproc) --coverage test_name --coveragedir .claude/coverage_dir/`; this uses a `trace` based mechanism as implemented using libregrtest.
+* To collect Python code coverage from part of the test suite, use `BUILD_PY -m test -j $(nproc) --coverage test_name --coveragedir .claude/coverage_dir/`; this uses a `trace` based mechanism as implemented using libregrtest.
 
 ### Debugging
 
-* For interactive debugging using tools like pdb, lldb, or gdb and when working on an interactive feature such as the REPL: spawn and control a tmux session to drive that.  Always clean up your tmux sessions when you are done with them.
+* For interactive debugging (pdb, lldb, or gdb) or when working on an interactive feature such as the REPL: control a tmux session to drive that.
 
 ## Scratch space
 
@@ -81,8 +83,8 @@ ONLY build in a `build/` subdirectory that you create at the repo root.
 
 ## Linting
 
-* `pre-commit run --all-files` will help you.
-* Use sub-agents when running these steps and always run them from the repo root:
+* `pre-commit run --all-files`
+* Run these steps from the repo root:
  * `make -C BUILD_DIR patchcheck` should be made to pass before committing.
  * For public documentation changes `make -C Doc check`
 
