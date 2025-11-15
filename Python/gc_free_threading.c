@@ -1782,7 +1782,30 @@ handle_legacy_finalizers(struct collection_state *state)
 static void
 show_stats_each_generations(GCState *gcstate)
 {
-    // TODO
+    char buf[100];
+    size_t pos = 0;
+
+    // Generation 0: young
+    pos += PyOS_snprintf(buf+pos, sizeof(buf)-pos,
+                         " %d",
+                         _Py_atomic_load_int_relaxed(&gcstate->young.count));
+
+    // Generation 1: old[visited_space]
+    pos += PyOS_snprintf(buf+pos, sizeof(buf)-pos,
+                         " %d",
+                         _Py_atomic_load_int_relaxed(&gcstate->old[gcstate->visited_space].count));
+
+    // Generation 2: old[visited_space^1]
+    if (pos < sizeof(buf)) {
+        pos += PyOS_snprintf(buf+pos, sizeof(buf)-pos,
+                             " %d",
+                             _Py_atomic_load_int_relaxed(&gcstate->old[gcstate->visited_space^1].count));
+    }
+
+    PySys_FormatStderr(
+        "gc: objects in each generation:%s\n"
+        "gc: objects in permanent generation: %d\n",
+        buf, _Py_atomic_load_int_relaxed(&gcstate->permanent_generation.count));
 }
 
 // Traversal callback for handle_resurrected_objects.
