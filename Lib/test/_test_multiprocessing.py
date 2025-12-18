@@ -6287,6 +6287,102 @@ class TestResourceTracker(unittest.TestCase):
             # restore sigmask to what it was before executing test
             signal.pthread_sigmask(signal.SIG_SETMASK, orig_sigmask)
 
+    @unittest.skipIf(sys.platform == "win32", "fork is not available on Windows")
+    def test_resource_tracker_del_hang_with_fork(self):
+        # gh-XXXXX: Test that ResourceTracker.__del__ doesn't hang when
+        # a forked child process inherits the resource tracker's file
+        # descriptor and keeps it open.
+        #
+        # The hang occurs because:
+        # 1. ResourceTracker uses a pipe to communicate with its subprocess
+        # 2. When fork() is used, the child inherits the write end of the pipe
+        # 3. In __del__, _stop_locked() closes the fd and calls waitpid()
+        # 4. But the tracker process won't exit until ALL copies of the write
+        #    end are closed (to get EOF)
+        # 5. If the forked child still has the fd open, waitpid() blocks forever
+        cmd = '''if 1:
+            import os
+            import sys
+            import time
+            import signal
+            import multiprocessing as mp
+            from multiprocessing.resource_tracker import ResourceTracker
+
+            if __name__ == "__main__":
+                mp.set_start_method("fork")
+
+                # Create a separate ResourceTracker instance for testing
+                tracker = ResourceTracker()
+                tracker.ensure_running()
+                tracker_fd = tracker._fd
+                tracker_pid = tracker._pid
+
+                # Fork a child that will keep the tracker's fd open
+                child_pid = os.fork()
+                if child_pid == 0:
+                    # Child process: keep the fd open and sleep
+                    # This simulates a long-running forked child
+                    time.sleep(30)
+                    os._exit(0)
+
+                # Parent process: try to stop the tracker
+                # This should NOT hang - if it does, the test will timeout
+                # and be killed by the test harness
+                #
+                # Set an alarm to detect the hang - if we're still in waitpid()
+                # after 5 seconds, we have reproduced the bug
+                def alarm_handler(signum, frame):
+                    # If we get here, _stop() hung on waitpid()
+                    print("HANG DETECTED: _stop() blocked on waitpid()", flush=True)
+                    # Kill the forked child so it doesn't become orphaned
+                    os.kill(child_pid, signal.SIGKILL)
+                    os.waitpid(child_pid, 0)
+                    # Kill the resource tracker directly
+                    try:
+                        os.kill(tracker_pid, signal.SIGKILL)
+                        os.waitpid(tracker_pid, 0)
+                    except (ProcessLookupError, ChildProcessError):
+                        pass
+                    sys.exit(1)
+
+                signal.signal(signal.SIGALRM, alarm_handler)
+                signal.alarm(5)
+
+                try:
+                    # This call to __del__ (via _stop) would hang in the buggy code
+                    # because the forked child still has tracker._fd open
+                    tracker.__del__()
+                    signal.alarm(0)  # Cancel the alarm
+                    print("SUCCESS: _stop() completed without hanging", flush=True)
+                finally:
+                    # Clean up the forked child
+                    os.kill(child_pid, signal.SIGKILL)
+                    os.waitpid(child_pid, 0)
+
+                sys.exit(0)
+        '''
+        p = subprocess.Popen(
+            [sys.executable, '-c', cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        try:
+            out, err = p.communicate(timeout=support.SHORT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, err = p.communicate()
+            self.fail(f"Test subprocess timed out (possible hang). "
+                      f"stdout={out!r}, stderr={err!r}")
+
+        # The script uses exit code 1 when hang is detected (via alarm handler)
+        # and exit code 0 when no hang occurred
+        self.assertEqual(p.returncode, 1,
+            f"Expected hang to be detected (exit code 1). "
+            f"Got exit code {p.returncode}. stdout={out!r}, stderr={err!r}")
+        self.assertIn(b"HANG DETECTED", out,
+            f"Expected hang detection message. stdout={out!r}, stderr={err!r}")
+
+
 class TestSimpleQueue(unittest.TestCase):
 
     @classmethod
