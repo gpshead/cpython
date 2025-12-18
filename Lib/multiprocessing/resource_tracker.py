@@ -79,6 +79,36 @@ class ResourceTracker(object):
         # The reader should understand all formats.
         self._use_simple_format = True
 
+        if os.name == 'posix':
+            # Register handler to clean up after fork.
+            # This is critical to prevent hangs when the parent process
+            # tries to stop the resource tracker while forked children
+            # still have the write fd open.
+            util.register_after_fork(self, ResourceTracker._afterfork)
+
+    def _afterfork(self):
+        # After fork, the child process inherits the write fd to the
+        # parent's resource tracker subprocess. We must:
+        # 1. Close the inherited fd so the parent's tracker can get EOF
+        # 2. Reset state so the child can start its own tracker if needed
+        #
+        # Without this, the parent's _stop_locked() will hang in waitpid()
+        # because the tracker subprocess won't exit until all write fds
+        # are closed (it's waiting for EOF on the pipe).
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass  # May already be closed
+        self._fd = None
+        # Don't wait on the parent's tracker process - it's not our child
+        self._pid = None
+        self._exitcode = None
+        # Clear any pending messages from the parent
+        self._reentrant_messages.clear()
+        # Reinitialize the lock (may be in inconsistent state after fork)
+        self._lock._at_fork_reinit()
+
     def _reentrant_call_error(self):
         # gh-109629: this happens if an explicit call to the ResourceTracker
         # gets interrupted by a garbage collection, invoking a finalizer (*)
