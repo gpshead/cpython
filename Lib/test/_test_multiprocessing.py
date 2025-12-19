@@ -6290,12 +6290,12 @@ class TestResourceTracker(unittest.TestCase):
     @unittest.skipIf(sys.platform == "win32", "fork is not available on Windows")
     def test_resource_tracker_del_hang_with_fork(self):
         # gh-XXXXX: Test that ResourceTracker.__del__ doesn't hang when
-        # a forked child process inherits the resource tracker's file
-        # descriptor and keeps it open.
+        # a child process started with the "fork" method inherits the
+        # resource tracker's file descriptor and keeps it open.
         #
         # The hang occurs because:
         # 1. ResourceTracker uses a pipe to communicate with its subprocess
-        # 2. When fork() is used, the child inherits the write end of the pipe
+        # 2. When fork is used, the child inherits the write end of the pipe
         # 3. In __del__, _stop_locked() closes the fd and calls waitpid()
         # 4. But the tracker process won't exit until ALL copies of the write
         #    end are closed (to get EOF)
@@ -6308,35 +6308,43 @@ class TestResourceTracker(unittest.TestCase):
             import multiprocessing as mp
             from multiprocessing.resource_tracker import ResourceTracker
 
+            def child_process_task(ready_event):
+                """Child process that keeps running (and keeps inherited fds open)."""
+                ready_event.set()
+                # Simulate a long-running child process
+                time.sleep(30)
+
             if __name__ == "__main__":
                 mp.set_start_method("fork")
 
                 # Create a separate ResourceTracker instance for testing
                 tracker = ResourceTracker()
                 tracker.ensure_running()
-                tracker_fd = tracker._fd
                 tracker_pid = tracker._pid
 
-                # Fork a child that will keep the tracker's fd open
-                child_pid = os.fork()
-                if child_pid == 0:
-                    # Child process: keep the fd open and sleep
-                    # This simulates a long-running forked child
-                    time.sleep(30)
-                    os._exit(0)
+                # Start a child process using multiprocessing.Process with fork
+                # The child will inherit the tracker's fd
+                ready_event = mp.Event()
+                child = mp.Process(target=child_process_task, args=(ready_event,))
+                child.start()
+
+                # Wait for child to be ready
+                ready_event.wait(timeout=5)
 
                 # Parent process: try to stop the tracker
-                # This should NOT hang - if it does, the test will timeout
-                # and be killed by the test harness
+                # This should NOT hang - if it does, the alarm will fire
                 #
                 # Set an alarm to detect the hang - if we're still in waitpid()
                 # after 5 seconds, we have reproduced the bug
                 def alarm_handler(signum, frame):
                     # If we get here, _stop() hung on waitpid()
                     print("HANG DETECTED: _stop() blocked on waitpid()", flush=True)
-                    # Kill the forked child so it doesn't become orphaned
-                    os.kill(child_pid, signal.SIGKILL)
-                    os.waitpid(child_pid, 0)
+                    # Clean up the child process
+                    child.terminate()
+                    child.join(timeout=1)
+                    if child.is_alive():
+                        child.kill()
+                        child.join()
                     # Kill the resource tracker directly
                     try:
                         os.kill(tracker_pid, signal.SIGKILL)
@@ -6355,9 +6363,12 @@ class TestResourceTracker(unittest.TestCase):
                     signal.alarm(0)  # Cancel the alarm
                     print("SUCCESS: _stop() completed without hanging", flush=True)
                 finally:
-                    # Clean up the forked child
-                    os.kill(child_pid, signal.SIGKILL)
-                    os.waitpid(child_pid, 0)
+                    # Clean up the child process
+                    child.terminate()
+                    child.join(timeout=1)
+                    if child.is_alive():
+                        child.kill()
+                        child.join()
 
                 sys.exit(0)
         '''
