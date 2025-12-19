@@ -67,6 +67,11 @@ class ResourceTracker(object):
         self._pid = None
         self._exitcode = None
         self._reentrant_messages = deque()
+        # Register callback to clean up inherited file descriptor after fork.
+        # This prevents the parent's __del__ from hanging in waitpid() because
+        # forked children would otherwise keep the tracker's pipe open.
+        if hasattr(os, 'register_at_fork'):
+            os.register_at_fork(after_in_child=self._after_fork_in_child)
 
     def _reentrant_call_error(self):
         # gh-109629: this happens if an explicit call to the ResourceTracker
@@ -81,6 +86,24 @@ class ResourceTracker(object):
         # gets destructed.
         # see https://github.com/python/cpython/issues/88887
         self._stop(use_blocking_lock=False)
+
+    def _after_fork_in_child(self):
+        # After fork, the child process inherits the parent's _fd (the write
+        # end of the pipe to the resource tracker). If we don't close it,
+        # the parent's __del__ will hang in waitpid() because the tracker
+        # won't get EOF until ALL copies of _fd are closed.
+        #
+        # By closing _fd here, the child:
+        # 1. Won't keep the parent's tracker alive
+        # 2. Will launch its own tracker if it needs one (via ensure_running)
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
+        # The child is not the parent of the tracker process
+        self._pid = None
 
     def _stop(self, use_blocking_lock=True):
         if use_blocking_lock:

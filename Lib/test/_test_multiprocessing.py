@@ -6197,33 +6197,36 @@ class TestResourceTracker(unittest.TestCase):
         self.check_resource_tracker_death(signal.SIGKILL, True)
 
     @staticmethod
-    def _is_resource_tracker_reused(conn, pid):
+    def _get_child_resource_tracker_info(conn):
         from multiprocessing.resource_tracker import _resource_tracker
         _resource_tracker.ensure_running()
-        # The pid should be None in the child process, expect for the fork
-        # context. It should not be a new value.
-        reused = _resource_tracker._pid in (None, pid)
-        reused &= _resource_tracker._check_alive()
-        conn.send(reused)
+        conn.send((_resource_tracker._pid, _resource_tracker._check_alive()))
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
-    def test_resource_tracker_reused(self):
+    def test_resource_tracker_in_child(self):
+        # Test that child processes have a working resource tracker.
+        # The child's tracker may be different from the parent's (for fork,
+        # the child closes the inherited fd and gets its own tracker).
         from multiprocessing.resource_tracker import _resource_tracker
         _resource_tracker.ensure_running()
-        pid = _resource_tracker._pid
+        parent_tracker_pid = _resource_tracker._pid
 
         r, w = multiprocessing.Pipe(duplex=False)
-        p = multiprocessing.Process(target=self._is_resource_tracker_reused,
-                                    args=(w, pid))
+        p = multiprocessing.Process(target=self._get_child_resource_tracker_info,
+                                    args=(w,))
         p.start()
-        is_resource_tracker_reused = r.recv()
+        child_tracker_pid, child_tracker_alive = r.recv()
 
         # Clean up
         p.join()
         w.close()
         r.close()
 
-        self.assertTrue(is_resource_tracker_reused)
+        # Child should have a working tracker
+        self.assertTrue(child_tracker_alive, "Child's resource tracker is not alive")
+        # Child's tracker should be different from parent's (child gets its own)
+        self.assertNotEqual(child_tracker_pid, parent_tracker_pid,
+            "Child should have its own resource tracker, not reuse parent's")
 
     def test_too_long_name_resource(self):
         # gh-96819: Resource names that will make the length of a write to a pipe
