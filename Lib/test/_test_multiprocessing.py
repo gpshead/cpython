@@ -6289,6 +6289,8 @@ class TestResourceTracker(unittest.TestCase):
 
     @unittest.skipIf(sys.platform == "win32", "fork is not available on Windows")
     def test_resource_tracker_del_hang_with_fork(self):
+        if multiprocessing.get_start_method() != "fork":
+            self.skipTest("test only relevant for fork start method")
         # gh-XXXXX: Test that ResourceTracker.__del__ doesn't hang when
         # a child process started with the "fork" method inherits the
         # resource tracker's file descriptor and keeps it open.
@@ -6385,13 +6387,13 @@ class TestResourceTracker(unittest.TestCase):
             self.fail(f"Test subprocess timed out (possible hang). "
                       f"stdout={out!r}, stderr={err!r}")
 
-        # The script uses exit code 1 when hang is detected (via alarm handler)
-        # and exit code 0 when no hang occurred
-        self.assertEqual(p.returncode, 1,
-            f"Expected hang to be detected (exit code 1). "
-            f"Got exit code {p.returncode}. stdout={out!r}, stderr={err!r}")
-        self.assertIn(b"HANG DETECTED", out,
-            f"Expected hang detection message. stdout={out!r}, stderr={err!r}")
+        # The script exits with 0 on success (no hang), 1 if hang detected.
+        # As a regression test, we expect success (no hang).
+        self.assertEqual(p.returncode, 0,
+            f"ResourceTracker.__del__ hung (regression). "
+            f"stdout={out!r}, stderr={err!r}")
+        self.assertIn(b"SUCCESS", out,
+            f"Expected success message. stdout={out!r}, stderr={err!r}")
 
 
 class TestSimpleQueue(unittest.TestCase):
