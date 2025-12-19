@@ -6287,7 +6287,6 @@ class TestResourceTracker(unittest.TestCase):
             # restore sigmask to what it was before executing test
             signal.pthread_sigmask(signal.SIG_SETMASK, orig_sigmask)
 
-    @unittest.skipIf(sys.platform == "win32", "fork is not available on Windows")
     def test_resource_tracker_del_hang_with_fork(self):
         if multiprocessing.get_start_method() != "fork":
             self.skipTest("test only relevant for fork start method")
