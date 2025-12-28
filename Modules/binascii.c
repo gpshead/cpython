@@ -144,7 +144,7 @@ base64_encode_fast(const unsigned char *in, Py_ssize_t in_len,
 {
     Py_ssize_t processed = 0;
 
-#if defined(BASE64_X86_64) && defined(__AVX512VBMI__)
+#if BASE64_HAS_AVX512_COMPILED
     /* Use AVX-512 VBMI for large buffers if available */
     if (in_len >= 48 && base64_has_avx512vbmi()) {
         processed = base64_encode_avx512vbmi(in, in_len, out, table);
@@ -197,7 +197,7 @@ base64_decode_fast(const unsigned char *in, Py_ssize_t in_len,
 {
     Py_ssize_t processed = 0;
 
-#if defined(BASE64_X86_64) && defined(__AVX512VBMI__)
+#if BASE64_HAS_AVX512_COMPILED
     /* Use AVX-512 VBMI for large buffers if available */
     if (in_len >= 64 && base64_has_avx512vbmi()) {
         processed = base64_decode_avx512vbmi(in, in_len, out, table);

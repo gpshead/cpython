@@ -72,9 +72,25 @@ static inline int base64_has_avx512vbmi(void) { return 0; }
  * Encoding: 48 input bytes -> 64 output chars
  * Decoding: 64 input chars -> 48 output bytes
  */
-#if defined(BASE64_X86_64) && defined(__AVX512VBMI__)
+#ifdef BASE64_X86_64
 
 #include <immintrin.h>
+
+/*
+ * Use target attributes on GCC/Clang to compile AVX-512 code on any x86-64.
+ * MSVC doesn't support function-level target attributes; it requires /arch:AVX512.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define BASE64_AVX512_TARGET __attribute__((target("avx512f,avx512bw,avx512vbmi")))
+#define BASE64_HAS_AVX512_COMPILED 1
+#elif defined(_MSC_VER) && defined(__AVX512VBMI__)
+#define BASE64_AVX512_TARGET
+#define BASE64_HAS_AVX512_COMPILED 1
+#else
+#define BASE64_HAS_AVX512_COMPILED 0
+#endif
+
+#if BASE64_HAS_AVX512_COMPILED
 
 /* The base64 encoding table as a 512-bit vector */
 static const char _b64_table[64] __attribute__((aligned(64))) =
@@ -83,6 +99,7 @@ static const char _b64_table[64] __attribute__((aligned(64))) =
 /*
  * Encode 48 bytes to 64 base64 characters using AVX-512 VBMI
  */
+BASE64_AVX512_TARGET
 static inline void
 base64_encode_48_avx512(const uint8_t *in, uint8_t *out)
 {
@@ -212,6 +229,7 @@ static const int8_t _b64_decode_table[128] __attribute__((aligned(64))) = {
  * Decode 64 base64 characters to 48 bytes using AVX-512 VBMI
  * Returns 48 on success, -1 if padding found or invalid character
  */
+BASE64_AVX512_TARGET
 static inline int
 base64_decode_64_avx512(const uint8_t *in, uint8_t *out)
 {
@@ -321,6 +339,7 @@ base64_decode_64_avx512(const uint8_t *in, uint8_t *out)
  * Encode using AVX-512 VBMI
  * Returns number of input bytes processed (multiple of 48)
  */
+BASE64_AVX512_TARGET
 static Py_ssize_t
 base64_encode_avx512vbmi(const unsigned char *in, Py_ssize_t in_len,
                          unsigned char *out, const unsigned char *table)
@@ -339,6 +358,7 @@ base64_encode_avx512vbmi(const unsigned char *in, Py_ssize_t in_len,
  * Decode using AVX-512 VBMI
  * Returns number of input bytes processed (multiple of 64)
  */
+BASE64_AVX512_TARGET
 static Py_ssize_t
 base64_decode_avx512vbmi(const unsigned char *in, Py_ssize_t in_len,
                          unsigned char *out, const unsigned char *table)
@@ -355,6 +375,8 @@ base64_decode_avx512vbmi(const unsigned char *in, Py_ssize_t in_len,
     return blocks * 64;
 }
 
-#endif /* AVX-512 VBMI */
+#endif /* BASE64_HAS_AVX512_COMPILED */
+
+#endif /* BASE64_X86_64 */
 
 #endif /* BASE64_SIMD_H */

@@ -471,6 +471,8 @@
     <ClCompile Include="..\Modules\atexitmodule.c" />
     <ClCompile Include="..\Modules\binascii.c">
       <PreprocessorDefinitions>USE_ZLIB_CRC32;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Platform)' == 'x64'">__AVX512VBMI__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions Condition="'$(Platform)' == 'x64'">/arch:AVX512 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile Include="..\Modules\cmathmodule.c" />
     <ClCompile Include="..\Modules\_datetimemodule.c" />
