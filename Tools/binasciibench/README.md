@@ -97,10 +97,26 @@ for (i = 0; i < n_trios; i++) {
 Measured on Intel Icelake-server (x86-64-v4 with AVX-512) with GCC 13.3.0,
 `-O3 -march=native`:
 
+### Scalar Optimization (loop restructuring)
+
 | Operation       | Before        | After         | Speedup |
 |-----------------|---------------|---------------|---------|
 | b2a_base64 64K  | 1.10 GB/s     | 1.93 GB/s     | 1.75x   |
 | a2b_base64 64K  | 295 MB/s      | 1.26 GB/s     | 4.27x   |
+
+### AVX-512 VBMI SIMD (on CPUs with VBMI support)
+
+CPUs with AVX-512 VBMI (Icelake, Zen4, etc.) get additional acceleration:
+
+| Operation       | Scalar        | AVX-512 VBMI  | Speedup |
+|-----------------|---------------|---------------|---------|
+| b2a_base64 64K  | 1.93 GB/s     | 22.8 GB/s     | 11.8x   |
+| a2b_base64 64K  | 1.26 GB/s     | 14.6 GB/s     | 11.6x   |
+
+The SIMD implementation uses:
+- `vpermb` for byte reshuffling across all 64 bytes
+- `vpmaddubsw`/`vpmaddwd` for 6-bit packing/unpacking
+- `vpermb` again for the final table lookup (encoding) or byte packing (decoding)
 
 ## Annotated Assembly Analysis
 

@@ -64,6 +64,9 @@
 #  include "zlib.h"
 #endif
 
+/* Optional SIMD acceleration (AVX-512 VBMI) */
+#include "base64_simd.h"
+
 typedef struct binascii_state {
     PyObject *Error;
     PyObject *Incomplete;
@@ -139,15 +142,25 @@ static inline Py_ssize_t
 base64_encode_fast(const unsigned char *in, Py_ssize_t in_len,
                    unsigned char *out, const unsigned char *table)
 {
-    Py_ssize_t n_trios = in_len / 3;
-    Py_ssize_t i;
+    Py_ssize_t processed = 0;
 
-    /* Process complete 3-byte groups. Each iteration is independent. */
-    for (i = 0; i < n_trios; i++) {
+#ifdef BASE64_X86_64
+    /* Use AVX-512 VBMI for large buffers if available */
+    if (in_len >= 48 && base64_has_avx512vbmi()) {
+        processed = base64_encode_avx512vbmi(in, in_len, out, table);
+        in += processed;
+        out += (processed / 3) * 4;
+        in_len -= processed;
+    }
+#endif
+
+    /* Process remaining bytes with scalar code */
+    Py_ssize_t n_trios = in_len / 3;
+    for (Py_ssize_t i = 0; i < n_trios; i++) {
         base64_encode_trio(in + i * 3, out + i * 4, table);
     }
 
-    return n_trios * 3;
+    return processed + n_trios * 3;
 }
 
 /* Decode 4 base64 characters into 3 bytes using table lookup.
@@ -182,10 +195,21 @@ static inline Py_ssize_t
 base64_decode_fast(const unsigned char *in, Py_ssize_t in_len,
                    unsigned char *out, const unsigned char *table)
 {
+    Py_ssize_t processed = 0;
+
+#ifdef BASE64_X86_64
+    /* Use AVX-512 VBMI for large buffers if available */
+    if (in_len >= 64 && base64_has_avx512vbmi()) {
+        processed = base64_decode_avx512vbmi(in, in_len, out, table);
+        in += processed;
+        out += (processed / 4) * 3;
+        in_len -= processed;
+    }
+#endif
+
+    /* Process remaining bytes with scalar code */
     Py_ssize_t n_quads = in_len / 4;
     Py_ssize_t i;
-
-    /* Process complete 4-character groups. Each iteration is mostly independent. */
     for (i = 0; i < n_quads; i++) {
         const unsigned char *inp = in + i * 4;
 
@@ -199,7 +223,7 @@ base64_decode_fast(const unsigned char *in, Py_ssize_t in_len,
         }
     }
 
-    return i * 4;
+    return processed + i * 4;
 }
 
 static const unsigned char table_b2a_base64[] =
