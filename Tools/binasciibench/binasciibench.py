@@ -70,26 +70,6 @@ def benchmark_decode(data, num_ops):
     return end - start
 
 
-def benchmark_encode_with_newline(data, num_ops):
-    """Benchmark base64 encoding with newline (default behavior)."""
-    b2a = binascii.b2a_base64
-    start = time.perf_counter_ns()
-    for _ in range(num_ops):
-        b2a(data)
-    end = time.perf_counter_ns()
-    return end - start
-
-
-def benchmark_decode_strict(data, num_ops):
-    """Benchmark base64 decoding in strict mode."""
-    a2b = binascii.a2b_base64
-    start = time.perf_counter_ns()
-    for _ in range(num_ops):
-        a2b(data, strict_mode=True)
-    end = time.perf_counter_ns()
-    return end - start
-
-
 def calibrate_ops(bench_func, data, target_time_ms):
     """Determine number of operations needed for accurate timing."""
     # Start with a small number of ops
@@ -189,25 +169,11 @@ def run_all_benchmarks(sizes, iterations, warmup):
                               iterations, warmup)
         print_results("b2a_base64", size, times, num_ops, size)
 
-        # Benchmark encode with newline
-        num_ops = calibrate_ops(benchmark_encode_with_newline, binary_data,
-                                TARGET_TIME_MS)
-        times = run_benchmark(benchmark_encode_with_newline, binary_data,
-                              num_ops, iterations, warmup)
-        print_results("b2a_base64(newline)", size, times, num_ops, size)
-
         # Benchmark decode
         num_ops = calibrate_ops(benchmark_decode, base64_data, TARGET_TIME_MS)
         times = run_benchmark(benchmark_decode, base64_data, num_ops,
                               iterations, warmup)
         print_results("a2b_base64", size, times, num_ops, size)
-
-        # Benchmark decode strict
-        num_ops = calibrate_ops(benchmark_decode_strict, base64_data,
-                                TARGET_TIME_MS)
-        times = run_benchmark(benchmark_decode_strict, base64_data, num_ops,
-                              iterations, warmup)
-        print_results("a2b_base64(strict)", size, times, num_ops, size)
 
         print()
 
