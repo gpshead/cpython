@@ -16,6 +16,11 @@
 
 #if defined(__aarch64__) || defined(_M_ARM64)
 #define BASE64_ARM64
+#define BASE64_ARM_NEON 1
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+/* AArch32 with NEON */
+#define BASE64_ARM32_NEON
+#define BASE64_ARM_NEON 1
 #endif
 
 /*
@@ -393,12 +398,59 @@ base64_decode_avx512vbmi(const unsigned char *in, Py_ssize_t in_len,
  *
  * Encoding: 12 input bytes -> 16 output chars per iteration
  * Decoding: 16 input chars -> 12 output bytes per iteration
+ *
+ * Supports both AArch64 and AArch32 with NEON.
  */
-#ifdef BASE64_ARM64
+#if BASE64_ARM_NEON
 
 #include <arm_neon.h>
 
 #define BASE64_HAS_NEON 1
+
+/*
+ * Compatibility layer for AArch32 vs AArch64 NEON intrinsics
+ */
+#ifdef BASE64_ARM64
+/* AArch64: use native intrinsics */
+
+static inline uint8x16_t
+neon_tbl1q(uint8x16_t tbl, uint8x16_t idx)
+{
+    return vqtbl1q_u8(tbl, idx);
+}
+
+static inline int
+neon_any_nonzero(uint8x16_t v)
+{
+    return vmaxvq_u8(v) != 0;
+}
+
+#else /* BASE64_ARM32_NEON */
+/* AArch32: emulate missing intrinsics */
+
+static inline uint8x16_t
+neon_tbl1q(uint8x16_t tbl, uint8x16_t idx)
+{
+    /* AArch32 vtbl only works on 8-byte chunks */
+    uint8x8x2_t tbl2 = {{ vget_low_u8(tbl), vget_high_u8(tbl) }};
+    uint8x8_t lo = vtbl2_u8(tbl2, vget_low_u8(idx));
+    uint8x8_t hi = vtbl2_u8(tbl2, vget_high_u8(idx));
+    return vcombine_u8(lo, hi);
+}
+
+static inline int
+neon_any_nonzero(uint8x16_t v)
+{
+    /* Horizontal OR reduction: check if any byte is non-zero */
+    uint8x8_t lo = vget_low_u8(v);
+    uint8x8_t hi = vget_high_u8(v);
+    uint8x8_t combined = vorr_u8(lo, hi);
+    uint32x2_t as32 = vreinterpret_u32_u8(combined);
+    return (vget_lane_u32(as32, 0) | vget_lane_u32(as32, 1)) != 0;
+}
+
+#endif /* AArch32 vs AArch64 */
+
 
 /*
  * Encode 12 bytes to 16 base64 characters using NEON
@@ -417,130 +469,45 @@ base64_encode_12_neon(const uint8_t *in, uint8_t *out)
     /*
      * Load 12 input bytes into a 16-byte vector.
      * We load 16 bytes but only use the first 12.
-     * Layout: [b0,b1,b2, b3,b4,b5, b6,b7,b8, b9,b10,b11, x,x,x,x]
      */
     uint8x16_t input = vld1q_u8(in);
 
     /*
-     * Reshuffle bytes for 6-bit extraction.
-     * For each triplet (b0,b1,b2), we need to extract 4 sextets.
-     * Arrange as: [b0,b0,b1,b2] for each triplet to enable the
-     * shift-and-mask extraction.
-     *
-     * Input triplets at indices: [0,1,2], [3,4,5], [6,7,8], [9,10,11]
-     * Output 16 bytes, 4 per triplet.
+     * Reshuffle bytes using pattern [b1, b0, b2, b1] for each triplet.
+     * This works well with the multiply-mask trick for 6-bit extraction.
      */
     static const uint8_t shuf_tbl[16] = {
-         0,  0,  1,  2,    /*  triplet 0: b0,b0,b1,b2 */
-         3,  3,  4,  5,    /*  triplet 1 */
-         6,  6,  7,  8,    /*  triplet 2 */
-         9,  9, 10, 11     /*  triplet 3 */
-    };
-    uint8x16_t shuf = vld1q_u8(shuf_tbl);
-    uint8x16_t shuffled = vqtbl1q_u8(input, shuf);
-
-    /*
-     * Now each group of 4 bytes contains [b0, b0, b1, b2].
-     * Reinterpret as 32-bit words for extraction.
-     *
-     * For each 32-bit word (little-endian): b2 | (b1<<8) | (b0<<16) | (b0<<24)
-     *
-     * Extract sextets using shifts and masks:
-     *   sextet0 = (b0 >> 2) & 0x3F
-     *   sextet1 = ((b0 << 4) | (b1 >> 4)) & 0x3F
-     *   sextet2 = ((b1 << 2) | (b2 >> 6)) & 0x3F
-     *   sextet3 = b2 & 0x3F
-     */
-
-    /* Split into even/odd 16-bit pairs for the multiply-mask trick */
-    uint32x4_t in32 = vreinterpretq_u32_u8(shuffled);
-
-    /* Mask and shift to extract sextets */
-    /* After shuffle, as 32-bit LE: word = b2 | (b1<<8) | (b0<<16) | (b0<<24) */
-
-    /* Extract using AND + shift approach */
-    uint32x4_t mask0 = vdupq_n_u32(0x0000003F);  /* sextet3: bits 0-5 */
-    uint32x4_t mask1 = vdupq_n_u32(0x00003F00);  /* sextet2: bits 8-13 */
-    uint32x4_t mask2 = vdupq_n_u32(0x003F0000);  /* sextet1: bits 16-21 */
-    uint32x4_t mask3 = vdupq_n_u32(0x3F000000);  /* sextet0: bits 24-29 */
-
-    /* But we need different bit positions... Let me recalculate. */
-    /*
-     * After vqtbl1q_u8 with our shuffle, byte layout is:
-     * [b0, b0, b1, b2, b0, b0, b1, b2, ...]
-     *
-     * As 32-bit little-endian:
-     * word = b2 | (b1 << 8) | (b0 << 16) | (b0 << 24)
-     *
-     * We want:
-     *   out[0] = (b0 >> 2) & 0x3F         = bits 18-23 of word, shifted
-     *   out[1] = ((b0&3)<<4) | (b1>>4)    = bits 12-17
-     *   out[2] = ((b1&0xF)<<2) | (b2>>6)  = bits 6-11
-     *   out[3] = b2 & 0x3F                = bits 0-5
-     *
-     * Use a different approach: work with 16-bit lanes.
-     */
-
-    /*
-     * Alternative: use the standard reshuffle pattern [b1, b0, b2, b1]
-     * which works better with the multiply-mask trick.
-     */
-    static const uint8_t shuf2_tbl[16] = {
          1,  0,  2,  1,    /* triplet 0: b1,b0,b2,b1 */
          4,  3,  5,  4,    /* triplet 1 */
          7,  6,  8,  7,    /* triplet 2 */
         10,  9, 11, 10     /* triplet 3 */
     };
-    uint8x16_t shuf2 = vld1q_u8(shuf2_tbl);
-    uint8x16_t reshuffled = vqtbl1q_u8(input, shuf2);
+    uint8x16_t shuf = vld1q_u8(shuf_tbl);
+    uint8x16_t reshuffled = neon_tbl1q(input, shuf);
 
     /*
-     * Now as 32-bit LE: word = b1 | (b0 << 8) | (b2 << 16) | (b1 << 24)
-     * Wait, that's not right either. Let me be more careful.
-     *
      * Bytes in memory after shuffle: [b1, b0, b2, b1, ...]
-     * As 32-bit little-endian load:
-     *   byte[0] = b1 -> bits 0-7
-     *   byte[1] = b0 -> bits 8-15
-     *   byte[2] = b2 -> bits 16-23
-     *   byte[3] = b1 -> bits 24-31
+     * As 16-bit little-endian pairs:
+     *   pair0 = b1 | (b0 << 8)
+     *   pair1 = b2 | (b1 << 8)
      *
-     * We need to extract:
-     *   sextet0 = b0[7:2] = bits 10-15 of word >> 10, masked
-     *   sextet1 = b0[1:0]:b1[7:4] = ((word >> 4) & 0x3F) for low bits...
-     *
-     * Actually, let's use the cleaner multiply approach:
-     */
-
-    /* Use the proven multiply-and-mask technique */
-    uint16x8_t in16 = vreinterpretq_u16_u8(reshuffled);
-
-    /*
-     * For 16-bit pairs, with layout [b1,b0] and [b2,b1] alternating:
-     * Pair 0 (bytes 0-1): b1 | (b0 << 8) as 16-bit LE
-     * Pair 1 (bytes 2-3): b2 | (b1 << 8) as 16-bit LE
-     *
-     * We want sextets from 24 bits [b0, b1, b2]:
-     *   s0 = b0 >> 2
-     *   s1 = (b0 << 4 | b1 >> 4) & 0x3F
-     *   s2 = (b1 << 2 | b2 >> 6) & 0x3F
-     *   s3 = b2 & 0x3F
-     *
-     * From pair0 = b1 | (b0 << 8):
+     * Extract sextets:
      *   s0 = (pair0 >> 10) & 0x3F
      *   s1 = (pair0 >> 4) & 0x3F
-     *
-     * From pair1 = b2 | (b1 << 8):
      *   s2 = (pair1 >> 6) & 0x3F
      *   s3 = pair1 & 0x3F
      */
+    uint16x8_t in16 = vreinterpretq_u16_u8(reshuffled);
 
     /* Split into even and odd 16-bit elements */
+#ifdef BASE64_ARM64
     uint16x4_t even = vuzp1_u16(vget_low_u16(in16), vget_high_u16(in16));
     uint16x4_t odd = vuzp2_u16(vget_low_u16(in16), vget_high_u16(in16));
-
-    /* even contains [pair0_t0, pair0_t1, pair0_t2, pair0_t3] = [b1|b0<<8, ...] */
-    /* odd contains  [pair1_t0, pair1_t1, pair1_t2, pair1_t3] = [b2|b1<<8, ...] */
+#else
+    uint16x4x2_t uzp = vuzp_u16(vget_low_u16(in16), vget_high_u16(in16));
+    uint16x4_t even = uzp.val[0];
+    uint16x4_t odd = uzp.val[1];
+#endif
 
     /* Extract sextets */
     uint16x4_t s0 = vshr_n_u16(even, 10);
@@ -548,57 +515,54 @@ base64_encode_12_neon(const uint8_t *in, uint8_t *out)
     uint16x4_t s2 = vand_u16(vshr_n_u16(odd, 6), vdup_n_u16(0x3F));
     uint16x4_t s3 = vand_u16(odd, vdup_n_u16(0x3F));
 
-    /* Interleave back: we want [s0,s1,s2,s3] for each triplet */
-    /* Zip s0,s1 and s2,s3, then zip those results */
-    uint16x4_t s01_lo = vzip1_u16(s0, s1);  /* [s0_0, s1_0, s0_1, s1_1] */
-    uint16x4_t s01_hi = vzip2_u16(s0, s1);  /* [s0_2, s1_2, s0_3, s1_3] */
+    /* Interleave: [s0,s1,s2,s3] for each triplet */
+#ifdef BASE64_ARM64
+    uint16x4_t s01_lo = vzip1_u16(s0, s1);
+    uint16x4_t s01_hi = vzip2_u16(s0, s1);
     uint16x4_t s23_lo = vzip1_u16(s2, s3);
     uint16x4_t s23_hi = vzip2_u16(s2, s3);
+#else
+    uint16x4x2_t z01 = vzip_u16(s0, s1);
+    uint16x4x2_t z23 = vzip_u16(s2, s3);
+    uint16x4_t s01_lo = z01.val[0];
+    uint16x4_t s01_hi = z01.val[1];
+    uint16x4_t s23_lo = z23.val[0];
+    uint16x4_t s23_hi = z23.val[1];
+#endif
 
-    /* Combine into final order */
+    /* Combine and narrow to 8-bit */
     uint16x8_t indices_lo = vcombine_u16(s01_lo, s23_lo);
     uint16x8_t indices_hi = vcombine_u16(s01_hi, s23_hi);
-
-    /* We have 16-bit indices but need 8-bit. Narrow them. */
     uint8x8_t idx_lo = vmovn_u16(indices_lo);
     uint8x8_t idx_hi = vmovn_u16(indices_hi);
 
-    /* Reorder: currently [s0_0,s1_0,s0_1,s1_1,s2_0,s3_0,s2_1,s3_1] in idx_lo */
-    /* We want [s0_0,s1_0,s2_0,s3_0,s0_1,s1_1,s2_1,s3_1] */
+    /* Reorder to final layout */
     static const uint8_t reorder_tbl[16] = {
-        0, 1, 4, 5, 2, 3, 6, 7,   /* reorder first 8 */
-        8, 9, 12, 13, 10, 11, 14, 15  /* reorder second 8 */
+        0, 1, 4, 5, 2, 3, 6, 7,
+        8, 9, 12, 13, 10, 11, 14, 15
     };
     uint8x16_t indices = vcombine_u8(idx_lo, idx_hi);
     uint8x16_t reorder = vld1q_u8(reorder_tbl);
-    indices = vqtbl1q_u8(indices, reorder);
+    indices = neon_tbl1q(indices, reorder);
 
     /*
-     * Now convert 6-bit indices to ASCII using arithmetic.
-     *
-     * idx < 26:  add 'A' (65)
-     * idx < 52:  add 'a' - 26 = 71
-     * idx < 62:  add '0' - 52 = -4 (or subtract 4)
-     * idx == 62: result is '+' (43), so add 43 - 62 = -19
-     * idx == 63: result is '/' (47), so add 47 - 63 = -16
-     *
-     * We can compute an offset for each index and add it.
+     * Convert 6-bit indices to ASCII using arithmetic.
      */
     uint8x16_t offset = vdupq_n_u8(65);  /* Start with 'A' offset */
 
-    /* Adjust for indices >= 26: add (71 - 65) = 6 */
+    /* Adjust for indices >= 26: add 6 */
     uint8x16_t ge26 = vcgeq_u8(indices, vdupq_n_u8(26));
     offset = vaddq_u8(offset, vandq_u8(ge26, vdupq_n_u8(6)));
 
-    /* Adjust for indices >= 52: add (-4 - 71) = -75, effectively (256-75)=181 */
+    /* Adjust for indices >= 52: subtract 75 */
     uint8x16_t ge52 = vcgeq_u8(indices, vdupq_n_u8(52));
     offset = vsubq_u8(offset, vandq_u8(ge52, vdupq_n_u8(75)));
 
-    /* Adjust for index 62: add (-19 - (-4)) = -15 */
+    /* Adjust for index 62: subtract 15 */
     uint8x16_t eq62 = vceqq_u8(indices, vdupq_n_u8(62));
     offset = vsubq_u8(offset, vandq_u8(eq62, vdupq_n_u8(15)));
 
-    /* Adjust for index 63: add (-16 - (-4)) = -12 */
+    /* Adjust for index 63: subtract 12 */
     uint8x16_t eq63 = vceqq_u8(indices, vdupq_n_u8(63));
     offset = vsubq_u8(offset, vandq_u8(eq63, vdupq_n_u8(12)));
 
@@ -622,20 +586,12 @@ base64_decode_16_neon(const uint8_t *in, uint8_t *out)
 
     /* Check for padding '=' - bail to scalar if found */
     uint8x16_t eq_mask = vceqq_u8(input, vdupq_n_u8('='));
-    if (vmaxvq_u8(eq_mask) != 0) {
+    if (neon_any_nonzero(eq_mask)) {
         return -1;
     }
 
     /*
      * Convert ASCII to 6-bit values using arithmetic (reverse of encode).
-     *
-     * 'A'-'Z' (65-90)  -> 0-25:  subtract 65
-     * 'a'-'z' (97-122) -> 26-51: subtract 71
-     * '0'-'9' (48-57)  -> 52-61: add 4
-     * '+' (43)         -> 62:    add 19
-     * '/' (47)         -> 63:    add 16
-     *
-     * Invalid chars should produce values >= 64.
      */
     uint8x16_t values = vdupq_n_u8(0xFF);  /* Start invalid */
 
@@ -664,73 +620,31 @@ base64_decode_16_neon(const uint8_t *in, uint8_t *out)
 
     /* Check for invalid (any value >= 64 means invalid input) */
     uint8x16_t invalid = vcgeq_u8(values, vdupq_n_u8(64));
-    if (vmaxvq_u8(invalid) != 0) {
+    if (neon_any_nonzero(invalid)) {
         return -1;
     }
 
     /*
-     * Combine four 6-bit values into three bytes.
-     * [s0, s1, s2, s3] -> [b0, b1, b2] where:
-     *   b0 = (s0 << 2) | (s1 >> 4)
-     *   b1 = (s1 << 4) | (s2 >> 2)
-     *   b2 = (s2 << 6) | s3
-     *
-     * Use multiply-add: vpmaddubsw equivalent on NEON.
-     */
-
-    /*
-     * First merge pairs: s0,s1 -> 12-bit value, s2,s3 -> 12-bit value
-     * Then merge those 12-bit pairs into 24-bit values.
-     */
-
-    /* Reinterpret as 16-bit for pair operations */
-    uint16x8_t vals16 = vreinterpretq_u16_u8(values);
-
-    /*
-     * For each pair of bytes [s_lo, s_hi] in 16-bit (little-endian: s_hi<<8 | s_lo):
-     * We want: (s_lo << 6) | s_hi = s_lo * 64 + s_hi
-     *
-     * Bytes are [s0,s1,s2,s3,s4,s5,...] = quads [s0,s1,s2,s3], [s4,s5,s6,s7],...
-     * As 16-bit: [s1<<8|s0, s3<<8|s2, s5<<8|s4, s7<<8|s6, ...]
-     *
-     * We want pairs (s0,s1) and (s2,s3) etc.
-     * First rearrange: swap adjacent bytes to get [s0<<8|s1, s2<<8|s3, ...]
-     */
-    uint8x16_t swapped = vrev16q_u8(values);  /* Swap bytes within 16-bit lanes */
-    uint16x8_t swapped16 = vreinterpretq_u16_u8(swapped);
-
-    /*
-     * Now swapped16[0] = s0<<8 | s1, swapped16[1] = s2<<8 | s3, etc.
-     *
-     * Merge: (s0 << 6) | s1 = ((s0<<8|s1) >> 2) & 0x0FFF
-     *        Actually: s0*64 + s1
-     * Since s0 is in high byte: ((s0<<8) >> 2) | s1 = (s0 << 6) | s1
-     * That's: (swapped16 >> 2) for high part, but we need to handle low byte.
-     *
-     * Let me use a clearer approach with explicit multiply-add.
+     * Combine four 6-bit values into three bytes using multiply-add.
      */
 
     /* Extract odd/even bytes for multiply-add */
     uint8x8x2_t deinterleaved = vuzp_u8(vget_low_u8(values), vget_high_u8(values));
-    uint8x8_t evens = deinterleaved.val[0];  /* s0, s2, s4, s6, s8, s10, s12, s14 */
-    uint8x8_t odds = deinterleaved.val[1];   /* s1, s3, s5, s7, s9, s11, s13, s15 */
+    uint8x8_t evens = deinterleaved.val[0];  /* s0, s2, s4, ... */
+    uint8x8_t odds = deinterleaved.val[1];   /* s1, s3, s5, ... */
 
-    /* Multiply evens by 64 and add odds: result = even*64 + odd */
+    /* Multiply evens by 64 and add odds: result = even*64 + odd (12 bits) */
     uint16x8_t merged = vmlal_u8(vmovl_u8(odds), evens, vdup_n_u8(64));
-    /* merged[i] = s_{2i} * 64 + s_{2i+1}, which is 12 bits */
 
-    /*
-     * Now merge pairs of 12-bit values into 24-bit values.
-     * merged = [m0, m1, m2, m3, m4, m5, m6, m7] where each m is 12 bits
-     *
-     * We want: (m0 << 12) | m1, (m2 << 12) | m3, etc.
-     *
-     * Extract even and odd 16-bit lanes:
-     */
+    /* Merge pairs of 12-bit values into 24-bit values */
+#ifdef BASE64_ARM64
     uint16x4_t m_even = vuzp1_u16(vget_low_u16(merged), vget_high_u16(merged));
     uint16x4_t m_odd = vuzp2_u16(vget_low_u16(merged), vget_high_u16(merged));
-
-    /* m_even = [m0, m2, m4, m6], m_odd = [m1, m3, m5, m7] */
+#else
+    uint16x4x2_t m_uzp = vuzp_u16(vget_low_u16(merged), vget_high_u16(merged));
+    uint16x4_t m_even = m_uzp.val[0];
+    uint16x4_t m_odd = m_uzp.val[1];
+#endif
 
     /* Compute (m_even << 12) | m_odd as 32-bit */
     uint32x4_t combined = vorrq_u32(
@@ -739,34 +653,20 @@ base64_decode_16_neon(const uint8_t *in, uint8_t *out)
     );
 
     /*
-     * Now each 32-bit element contains 24 bits of output data.
-     * combined[i] has bits 0-23 = output bytes [b0, b1, b2] for triplet i.
-     *
-     * In little-endian:
-     *   byte 0 = bits 0-7   = b2
-     *   byte 1 = bits 8-15  = b1
-     *   byte 2 = bits 16-23 = b0
-     *   byte 3 = 0
-     *
-     * We need to reverse bytes within each triplet and pack.
+     * Each 32-bit element has 24 bits of output in bytes [2,1,0].
+     * Reorder and pack to get 12 output bytes.
      */
     uint8x16_t bytes = vreinterpretq_u8_u32(combined);
 
-    /*
-     * Current layout: [b2,b1,b0,0, b2,b1,b0,0, b2,b1,b0,0, b2,b1,b0,0]
-     * We want:        [b0,b1,b2, b0,b1,b2, b0,b1,b2, b0,b1,b2]
-     *
-     * Use tbl to reorder and pack.
-     */
     static const uint8_t pack_tbl[16] = {
         2, 1, 0,    /* triplet 0 */
         6, 5, 4,    /* triplet 1 */
         10, 9, 8,   /* triplet 2 */
         14, 13, 12, /* triplet 3 */
-        0xFF, 0xFF, 0xFF, 0xFF  /* padding (won't be stored) */
+        0xFF, 0xFF, 0xFF, 0xFF  /* padding */
     };
     uint8x16_t pack_idx = vld1q_u8(pack_tbl);
-    uint8x16_t packed = vqtbl1q_u8(bytes, pack_idx);
+    uint8x16_t packed = neon_tbl1q(bytes, pack_idx);
 
     /* Store 12 output bytes */
     vst1_u8(out, vget_low_u8(packed));
@@ -819,7 +719,7 @@ base64_decode_neon(const unsigned char *in, Py_ssize_t in_len,
 
 #define BASE64_HAS_NEON 0
 
-#endif /* BASE64_ARM64 */
+#endif /* BASE64_ARM_NEON */
 
 
 #endif /* BASE64_SIMD_H */
