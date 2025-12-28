@@ -154,6 +154,17 @@ base64_encode_fast(const unsigned char *in, Py_ssize_t in_len,
     }
 #endif
 
+#if BASE64_HAS_NEON
+    /* Use NEON for large buffers on ARM64 */
+    if (in_len >= 12) {
+        Py_ssize_t neon_processed = base64_encode_neon(in, in_len, out, table);
+        processed += neon_processed;
+        in += neon_processed;
+        out += (neon_processed / 3) * 4;
+        in_len -= neon_processed;
+    }
+#endif
+
     /* Process remaining bytes with scalar code */
     Py_ssize_t n_trios = in_len / 3;
     for (Py_ssize_t i = 0; i < n_trios; i++) {
@@ -204,6 +215,17 @@ base64_decode_fast(const unsigned char *in, Py_ssize_t in_len,
         in += processed;
         out += (processed / 4) * 3;
         in_len -= processed;
+    }
+#endif
+
+#if BASE64_HAS_NEON
+    /* Use NEON for large buffers on ARM64 */
+    if (in_len >= 16) {
+        Py_ssize_t neon_processed = base64_decode_neon(in, in_len, out, table);
+        processed += neon_processed;
+        in += neon_processed;
+        out += (neon_processed / 4) * 3;
+        in_len -= neon_processed;
     }
 #endif
 
