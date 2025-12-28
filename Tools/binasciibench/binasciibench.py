@@ -5,21 +5,9 @@ This benchmark measures the throughput of base64 encoding and decoding
 operations using the binascii module's C implementation.
 
 Usage:
-    python Tools/binasciibench/binasciibench.py [--iterations N] [--sizes S1,S2,...]
+    python Tools/binasciibench/binasciibench.py [--sizes S1,S2,...] [--scaling]
 
-The benchmark tests various data sizes to help identify:
-- Small message overhead (function call, buffer allocation)
-- Large message throughput (core algorithm performance)
-- Scaling characteristics
-
-For testing vectorization improvements, compile Python with optimizations:
-    x86-64:  CFLAGS="-O3 -march=x86-64-v3" ./configure --enable-optimizations
-    ARM:     CFLAGS="-O3 -march=armv8.2-a" ./configure --enable-optimizations
-
-NOTE: Do NOT use --with-pydebug for benchmarking as debug builds include
-assertions and other overhead that would skew performance measurements.
-
-Then compare results before and after code changes.
+Each benchmark runs for ~1.5 seconds to ensure accurate measurements.
 """
 
 import argparse
@@ -30,13 +18,12 @@ import sys
 import time
 
 # Default test parameters
-DEFAULT_ITERATIONS = 10
-DEFAULT_WARMUP = 3
-DEFAULT_SIZES = [16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576]
+DEFAULT_SIZES = [64, 1024, 65536, 1048576]
 
-# Number of operations per timing run (adjusted per size for consistent timing)
-MIN_OPS_PER_RUN = 100
-TARGET_TIME_MS = 50  # Target ~50ms per measurement for accuracy
+# Timing targets
+TARGET_TOTAL_TIME_S = 1.5  # Target ~1.5 seconds total per benchmark
+MIN_ITERATIONS = 5         # Minimum iterations for statistical significance
+MIN_OPS_PER_ITER = 10      # Minimum operations per iteration
 
 
 def generate_test_data(size):
@@ -70,32 +57,35 @@ def benchmark_decode(data, num_ops):
     return end - start
 
 
-def calibrate_ops(bench_func, data, target_time_ms):
-    """Determine number of operations needed for accurate timing."""
-    # Start with a small number of ops
-    num_ops = MIN_OPS_PER_RUN
+def calibrate_and_run(bench_func, data, target_total_s):
+    """Calibrate and run benchmark to achieve target total time.
+
+    Returns (times_ns, num_ops) where times_ns is a list of per-iteration
+    timings and num_ops is the number of operations per iteration.
+    """
+    # Quick calibration: measure time for a small batch
+    num_ops = MIN_OPS_PER_ITER
     elapsed_ns = bench_func(data, num_ops)
-    elapsed_ms = elapsed_ns / 1_000_000
+    time_per_op_ns = elapsed_ns / num_ops
 
-    if elapsed_ms < 1:
-        # Too fast, need many more ops
-        num_ops = max(MIN_OPS_PER_RUN, int(num_ops * target_time_ms / max(0.1, elapsed_ms)))
-        # Re-measure to verify
-        elapsed_ns = bench_func(data, num_ops)
-        elapsed_ms = elapsed_ns / 1_000_000
+    # Calculate ops and iterations to hit target total time
+    # We want: iterations * num_ops * time_per_op = target_total
+    # With constraint: iterations >= MIN_ITERATIONS
+    target_ns = target_total_s * 1_000_000_000
 
-    # Adjust to hit target time
-    if elapsed_ms > 0:
-        num_ops = max(MIN_OPS_PER_RUN, int(num_ops * target_time_ms / elapsed_ms))
+    # Start with minimum iterations, calculate required ops
+    iterations = MIN_ITERATIONS
+    total_ops_needed = int(target_ns / time_per_op_ns)
+    num_ops = max(MIN_OPS_PER_ITER, total_ops_needed // iterations)
 
-    return num_ops
+    # If num_ops would be huge, increase iterations instead
+    max_ops_per_iter = 1_000_000
+    if num_ops > max_ops_per_iter:
+        num_ops = max_ops_per_iter
+        iterations = max(MIN_ITERATIONS, total_ops_needed // num_ops)
 
-
-def run_benchmark(bench_func, data, num_ops, iterations, warmup):
-    """Run a benchmark with warmup and multiple iterations."""
-    # Warmup runs
-    for _ in range(warmup):
-        bench_func(data, num_ops)
+    # Warmup
+    bench_func(data, num_ops)
 
     # Timed runs
     times_ns = []
@@ -103,7 +93,7 @@ def run_benchmark(bench_func, data, num_ops, iterations, warmup):
         elapsed_ns = bench_func(data, num_ops)
         times_ns.append(elapsed_ns)
 
-    return times_ns
+    return times_ns, num_ops
 
 
 def format_throughput(bytes_per_second):
@@ -148,11 +138,11 @@ def print_results(name, size, times_ns, num_ops, data_size):
           f"(+/- {cv:>5.1f}%)  {throughput:>12}")
 
 
-def run_all_benchmarks(sizes, iterations, warmup):
+def run_all_benchmarks(sizes):
     """Run all benchmark variants for all sizes."""
     print(f"binascii base64 benchmark")
     print(f"Python: {sys.version}")
-    print(f"Iterations: {iterations}, Warmup: {warmup}")
+    print(f"Target time per benchmark: {TARGET_TOTAL_TIME_S}s")
     print()
     print(f"{'Benchmark':<20} {'Size':>8}  {'Time/op':>15}  "
           f"{'Variance':>10}  {'Throughput':>12}")
@@ -164,21 +154,19 @@ def run_all_benchmarks(sizes, iterations, warmup):
         base64_data = generate_base64_data(size)
 
         # Benchmark encode
-        num_ops = calibrate_ops(benchmark_encode, binary_data, TARGET_TIME_MS)
-        times = run_benchmark(benchmark_encode, binary_data, num_ops,
-                              iterations, warmup)
+        times, num_ops = calibrate_and_run(benchmark_encode, binary_data,
+                                           TARGET_TOTAL_TIME_S)
         print_results("b2a_base64", size, times, num_ops, size)
 
         # Benchmark decode
-        num_ops = calibrate_ops(benchmark_decode, base64_data, TARGET_TIME_MS)
-        times = run_benchmark(benchmark_decode, base64_data, num_ops,
-                              iterations, warmup)
+        times, num_ops = calibrate_and_run(benchmark_decode, base64_data,
+                                           TARGET_TOTAL_TIME_S)
         print_results("a2b_base64", size, times, num_ops, size)
 
         print()
 
 
-def run_scaling_analysis(iterations, warmup):
+def run_scaling_analysis():
     """Analyze how performance scales with data size."""
     print("\nScaling Analysis")
     print("=" * 75)
@@ -191,22 +179,21 @@ def run_scaling_analysis(iterations, warmup):
     encode_rates = []
     decode_rates = []
 
+    # Use shorter time for scaling analysis (many sizes)
+    scaling_time = 0.25
+
     for size in sizes:
         binary_data = generate_test_data(size)
         base64_data = generate_base64_data(size)
 
         # Encode benchmark
-        num_ops = calibrate_ops(benchmark_encode, binary_data, TARGET_TIME_MS)
-        times = run_benchmark(benchmark_encode, binary_data, num_ops,
-                              iterations, warmup)
+        times, num_ops = calibrate_and_run(benchmark_encode, binary_data, scaling_time)
         mean_ns = statistics.mean(t / num_ops for t in times)
         encode_rate = size / mean_ns
         encode_rates.append((size, encode_rate))
 
         # Decode benchmark
-        num_ops = calibrate_ops(benchmark_decode, base64_data, TARGET_TIME_MS)
-        times = run_benchmark(benchmark_decode, base64_data, num_ops,
-                              iterations, warmup)
+        times, num_ops = calibrate_and_run(benchmark_decode, base64_data, scaling_time)
         mean_ns = statistics.mean(t / num_ops for t in times)
         decode_rate = size / mean_ns
         decode_rates.append((size, decode_rate))
@@ -232,18 +219,6 @@ def main():
         epilog=__doc__
     )
     parser.add_argument(
-        "-i", "--iterations",
-        type=int,
-        default=DEFAULT_ITERATIONS,
-        help=f"Number of timed iterations (default: {DEFAULT_ITERATIONS})"
-    )
-    parser.add_argument(
-        "-w", "--warmup",
-        type=int,
-        default=DEFAULT_WARMUP,
-        help=f"Number of warmup iterations (default: {DEFAULT_WARMUP})"
-    )
-    parser.add_argument(
         "-s", "--sizes",
         type=str,
         default=None,
@@ -254,30 +229,18 @@ def main():
         action="store_true",
         help="Run scaling analysis across many sizes"
     )
-    parser.add_argument(
-        "--quick",
-        action="store_true",
-        help="Quick run with fewer iterations and sizes"
-    )
 
     args = parser.parse_args()
 
-    if args.quick:
-        sizes = [64, 1024, 65536]
-        iterations = 3
-        warmup = 1
+    if args.sizes:
+        sizes = [int(s.strip()) for s in args.sizes.split(",")]
     else:
-        if args.sizes:
-            sizes = [int(s.strip()) for s in args.sizes.split(",")]
-        else:
-            sizes = DEFAULT_SIZES
-        iterations = args.iterations
-        warmup = args.warmup
+        sizes = DEFAULT_SIZES
 
-    run_all_benchmarks(sizes, iterations, warmup)
+    run_all_benchmarks(sizes)
 
     if args.scaling:
-        run_scaling_analysis(iterations, warmup)
+        run_scaling_analysis()
 
 
 if __name__ == "__main__":
