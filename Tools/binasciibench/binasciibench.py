@@ -5,7 +5,7 @@ This benchmark measures the throughput of base64 encoding and decoding
 operations using the binascii module's C implementation.
 
 Usage:
-    python Tools/binasciibench/binasciibench.py [--sizes S1,S2,...] [--scaling]
+    python Tools/binasciibench/binasciibench.py [--sizes S1,S2,...]
 
 Each benchmark runs for ~1.5 seconds to ensure accurate measurements.
 """
@@ -166,52 +166,6 @@ def run_all_benchmarks(sizes):
         print()
 
 
-def run_scaling_analysis():
-    """Analyze how performance scales with data size."""
-    print("\nScaling Analysis")
-    print("=" * 75)
-    print("Measuring bytes processed per nanosecond at different sizes")
-    print("(Higher is better, ideal scaling shows constant rate for large sizes)")
-    print()
-
-    sizes = [2**i for i in range(4, 21)]  # 16 bytes to 1MB
-
-    encode_rates = []
-    decode_rates = []
-
-    # Use shorter time for scaling analysis (many sizes)
-    scaling_time = 0.25
-
-    for size in sizes:
-        binary_data = generate_test_data(size)
-        base64_data = generate_base64_data(size)
-
-        # Encode benchmark
-        times, num_ops = calibrate_and_run(benchmark_encode, binary_data, scaling_time)
-        mean_ns = statistics.mean(t / num_ops for t in times)
-        encode_rate = size / mean_ns
-        encode_rates.append((size, encode_rate))
-
-        # Decode benchmark
-        times, num_ops = calibrate_and_run(benchmark_decode, base64_data, scaling_time)
-        mean_ns = statistics.mean(t / num_ops for t in times)
-        decode_rate = size / mean_ns
-        decode_rates.append((size, decode_rate))
-
-    print(f"{'Size':>10}  {'Encode (B/ns)':>15}  {'Decode (B/ns)':>15}")
-    print("-" * 45)
-    for i, size in enumerate(sizes):
-        print(f"{format_size(size):>10}  {encode_rates[i][1]:>15.3f}  "
-              f"{decode_rates[i][1]:>15.3f}")
-
-    # Report peak rates
-    print()
-    peak_encode = max(r[1] for r in encode_rates)
-    peak_decode = max(r[1] for r in decode_rates)
-    print(f"Peak encode rate: {format_throughput(peak_encode * 1e9)}")
-    print(f"Peak decode rate: {format_throughput(peak_decode * 1e9)}")
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Benchmark binascii base64 encoding and decoding",
@@ -224,11 +178,6 @@ def main():
         default=None,
         help="Comma-separated list of sizes to test (e.g., '64,256,1024')"
     )
-    parser.add_argument(
-        "--scaling",
-        action="store_true",
-        help="Run scaling analysis across many sizes"
-    )
 
     args = parser.parse_args()
 
@@ -238,9 +187,6 @@ def main():
         sizes = DEFAULT_SIZES
 
     run_all_benchmarks(sizes)
-
-    if args.scaling:
-        run_scaling_analysis()
 
 
 if __name__ == "__main__":

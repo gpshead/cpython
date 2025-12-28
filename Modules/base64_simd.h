@@ -92,8 +92,9 @@ static inline int base64_has_avx512vbmi(void) { return 0; }
 
 #if BASE64_HAS_AVX512_COMPILED
 
-/* The base64 encoding table as a 512-bit vector */
-static const char _b64_table[64] __attribute__((aligned(64))) =
+/* The base64 encoding table as a 512-bit vector (not null-terminated) */
+static const char _b64_table[64]
+    __attribute__((aligned(64), nonstring)) =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /*
