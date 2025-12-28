@@ -1982,6 +1982,8 @@ Python/sysmodule.o: $(srcdir)/Python/sysmodule.c Makefile $(srcdir)/Include/pydt
 
 $(IO_OBJS): $(IO_H)
 
+Modules/binascii.o: $(srcdir)/Modules/base64_simd.h
+
 .PHONY: regen-pegen-metaparser
 regen-pegen-metaparser:
 	@$(MKDIR_P) $(srcdir)/Tools/peg_generator/pegen

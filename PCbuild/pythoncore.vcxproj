@@ -391,6 +391,7 @@
     <ClInclude Include="..\Modules\_math.h" />
     <ClInclude Include="..\Modules\rotatingtree.h" />
     <ClInclude Include="..\Modules\_io\_iomodule.h" />
+    <ClInclude Include="..\Modules\base64_simd.h" />
     <ClInclude Include="..\Modules\cjkcodecs\alg_jisx0201.h" />
     <ClInclude Include="..\Modules\cjkcodecs\cjkcodecs.h" />
     <ClInclude Include="..\Modules\cjkcodecs\emu_jisx0213_2000.h" />
