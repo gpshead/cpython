@@ -6,14 +6,11 @@ the `binascii` module's base64 encoding and decoding functions.
 ## Usage
 
 ```bash
-# Quick benchmark with default sizes
-python Tools/binasciibench/binasciibench.py --quick
-
-# Full benchmark with all sizes
+# Default benchmark (64, 1K, 64K, 1M sizes)
 python Tools/binasciibench/binasciibench.py
 
-# Custom sizes and iterations
-python Tools/binasciibench/binasciibench.py --sizes 64,1024,65536 --iterations 10
+# Custom sizes
+python Tools/binasciibench/binasciibench.py --sizes 64,1024,65536
 
 # Scaling analysis across many sizes
 python Tools/binasciibench/binasciibench.py --scaling
@@ -99,19 +96,25 @@ Measured on Intel Icelake-server (x86-64-v4 with AVX-512) with GCC 13.3.0,
 
 ### Scalar Optimization (loop restructuring)
 
-| Operation       | Before        | After         | Speedup |
-|-----------------|---------------|---------------|---------|
-| b2a_base64 64K  | 1.10 GB/s     | 1.93 GB/s     | 1.75x   |
-| a2b_base64 64K  | 295 MB/s      | 1.26 GB/s     | 4.27x   |
+| Operation       | Size | Baseline      | Scalar Opt    | Speedup |
+|-----------------|------|---------------|---------------|---------|
+| b2a_base64      | 64   | 347 MB/s      | 391 MB/s      | 1.13x   |
+| a2b_base64      | 64   | 297 MB/s      | 730 MB/s      | 2.46x   |
+| b2a_base64      | 64K  | 1.10 GB/s     | 1.91 GB/s     | 1.74x   |
+| a2b_base64      | 64K  | 393 MB/s      | 1.53 GB/s     | 3.89x   |
 
 ### AVX-512 VBMI SIMD (on CPUs with VBMI support)
 
-CPUs with AVX-512 VBMI (Icelake, Zen4, etc.) get additional acceleration:
+CPUs with AVX-512 VBMI (Icelake, Zen4, etc.) get additional acceleration.
+Small buffers use the scalar path; SIMD kicks in at ≥48 bytes (encode) or
+≥64 bytes (decode):
 
-| Operation       | Scalar        | AVX-512 VBMI  | Speedup |
-|-----------------|---------------|---------------|---------|
-| b2a_base64 64K  | 1.93 GB/s     | 22.8 GB/s     | 11.8x   |
-| a2b_base64 64K  | 1.26 GB/s     | 14.6 GB/s     | 11.6x   |
+| Operation       | Size | Scalar Opt    | AVX-512 VBMI  | Speedup |
+|-----------------|------|---------------|---------------|---------|
+| b2a_base64      | 64   | 391 MB/s      | 433 MB/s      | 1.11x   |
+| a2b_base64      | 64   | 730 MB/s      | 918 MB/s      | 1.26x   |
+| b2a_base64      | 64K  | 1.91 GB/s     | 22.4 GB/s     | 11.7x   |
+| a2b_base64      | 64K  | 1.53 GB/s     | 19.4 GB/s     | 12.7x   |
 
 The SIMD implementation uses:
 - `vpermb` for byte reshuffling across all 64 bytes
