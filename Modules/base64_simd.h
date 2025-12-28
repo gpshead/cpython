@@ -355,24 +355,6 @@ base64_decode_avx512vbmi(const unsigned char *in, Py_ssize_t in_len,
     return blocks * 64;
 }
 
-#else  /* No AVX-512 VBMI */
-
-static Py_ssize_t
-base64_encode_avx512vbmi(const unsigned char *in, Py_ssize_t in_len,
-                         unsigned char *out, const unsigned char *table)
-{
-    (void)in; (void)in_len; (void)out; (void)table;
-    return 0;
-}
-
-static Py_ssize_t
-base64_decode_avx512vbmi(const unsigned char *in, Py_ssize_t in_len,
-                         unsigned char *out, const unsigned char *table)
-{
-    (void)in; (void)in_len; (void)out; (void)table;
-    return 0;
-}
-
 #endif /* AVX-512 VBMI */
 
 #endif /* BASE64_SIMD_H */
