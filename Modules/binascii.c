@@ -151,16 +151,31 @@ base64_encode_fast(const unsigned char *in, Py_ssize_t in_len,
 }
 
 /* Decode 4 base64 characters into 3 bytes using table lookup.
+ * Takes the pre-loaded 32-bit quad to avoid redundant memory loads.
  * Returns 1 on success, 0 if any character is invalid (value >= 64).
  */
 static inline int
-base64_decode_quad(const unsigned char *in, unsigned char *out,
-                   const unsigned char *table)
+base64_decode_quad_from_word(uint32_t quad, unsigned char *out,
+                             const unsigned char *table)
 {
-    unsigned char v0 = table[in[0]];
-    unsigned char v1 = table[in[1]];
-    unsigned char v2 = table[in[2]];
-    unsigned char v3 = table[in[3]];
+    /* Extract individual bytes from the pre-loaded quad.
+     * Note: byte order depends on endianness, but we handle both. */
+#if PY_BIG_ENDIAN
+    unsigned char c0 = (quad >> 24) & 0xff;
+    unsigned char c1 = (quad >> 16) & 0xff;
+    unsigned char c2 = (quad >> 8) & 0xff;
+    unsigned char c3 = quad & 0xff;
+#else
+    unsigned char c0 = quad & 0xff;
+    unsigned char c1 = (quad >> 8) & 0xff;
+    unsigned char c2 = (quad >> 16) & 0xff;
+    unsigned char c3 = (quad >> 24) & 0xff;
+#endif
+
+    unsigned char v0 = table[c0];
+    unsigned char v1 = table[c1];
+    unsigned char v2 = table[c2];
+    unsigned char v3 = table[c3];
 
     /* Check for invalid characters (table returns values >= 64 for invalid) */
     if ((v0 | v1 | v2 | v3) & 0xc0) {
@@ -184,17 +199,29 @@ base64_decode_fast(const unsigned char *in, Py_ssize_t in_len,
 {
     Py_ssize_t n_quads = in_len / 4;
     Py_ssize_t i;
+    /* Pre-compute the padding check mask: '=' repeated 4 times */
+    const uint32_t pad_mask = (uint32_t)'=' * 0x01010101U;
 
     /* Process complete 4-character groups. Each iteration is mostly independent. */
     for (i = 0; i < n_quads; i++) {
         const unsigned char *inp = in + i * 4;
 
-        /* Check for padding - exit fast path to handle it properly */
-        if (inp[0] == '=' || inp[1] == '=' || inp[2] == '=' || inp[3] == '=') {
+        /* Load all 4 bytes at once - reused for both padding check and decoding */
+        uint32_t quad;
+        memcpy(&quad, inp, 4);  /* Safe unaligned load */
+
+        /* Check for padding using the "has zero byte" technique.
+         * XOR with '====' pattern - any '=' byte becomes 0x00.
+         * The expression ((x - 0x01010101) & ~x & 0x80808080) is non-zero
+         * iff any byte in x is zero. This replaces 4 loads + 4 compares
+         * with a single load + 5 arithmetic ops. */
+        uint32_t xored = quad ^ pad_mask;
+        if (((xored - 0x01010101U) & ~xored & 0x80808080U) != 0) {
             break;
         }
 
-        if (!base64_decode_quad(inp, out + i * 3, table)) {
+        /* Decode using the already-loaded quad (avoids re-reading memory) */
+        if (!base64_decode_quad_from_word(quad, out + i * 3, table)) {
             break;
         }
     }
