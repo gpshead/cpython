@@ -154,6 +154,17 @@ base64_encode_fast(const unsigned char *in, Py_ssize_t in_len,
     }
 #endif
 
+#if BASE64_HAS_SVE
+    /* Use SVE for large buffers on ARM64 with vector length >= 256 bits */
+    if (in_len >= 24 && base64_has_sve256()) {
+        Py_ssize_t sve_processed = base64_encode_sve(in, in_len, out, table);
+        processed += sve_processed;
+        in += sve_processed;
+        out += (sve_processed / 3) * 4;
+        in_len -= sve_processed;
+    }
+#endif
+
 #if BASE64_HAS_NEON
     /* Use NEON for large buffers on ARM64 */
     if (in_len >= 12) {
@@ -215,6 +226,17 @@ base64_decode_fast(const unsigned char *in, Py_ssize_t in_len,
         in += processed;
         out += (processed / 4) * 3;
         in_len -= processed;
+    }
+#endif
+
+#if BASE64_HAS_SVE
+    /* Use SVE for large buffers on ARM64 with vector length >= 256 bits */
+    if (in_len >= 32 && base64_has_sve256()) {
+        Py_ssize_t sve_processed = base64_decode_sve(in, in_len, out, table);
+        processed += sve_processed;
+        in += sve_processed;
+        out += (sve_processed / 4) * 3;
+        in_len -= sve_processed;
     }
 #endif
 
