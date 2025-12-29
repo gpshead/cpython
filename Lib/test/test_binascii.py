@@ -489,6 +489,174 @@ class BinASCIITest(unittest.TestCase):
         restored = binascii.a2b_base64(self.type2test(converted))
         self.assertConversion(binary, converted, restored, newline=newline)
 
+    def test_base64_incremental_sizes(self):
+        # Test all sizes from 0 to 72 bytes to ensure correct handling
+        # of partial blocks and block boundary transitions.
+        # Vectorized implementations must correctly handle the transition
+        # between fast-path block processing and scalar remainder handling.
+        # This covers key block sizes: 6, 12, 16, 24, 32, 48, 64 bytes.
+        for size in range(73):
+            with self.subTest(size=size):
+                data = bytes([i % 256 for i in range(size)])
+                encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+                decoded = binascii.a2b_base64(self.type2test(encoded))
+                self.assertEqual(decoded, data)
+
+    def test_base64_pathological_patterns(self):
+        # Test with bit patterns that might reveal issues in vectorized
+        # implementations, particularly in shuffle/permutation operations
+        # or arithmetic encoding that uses specific bit manipulations.
+
+        # Sizes chosen to exercise different block processing paths
+        test_sizes = [12, 24, 48, 64, 96]
+
+        for size in test_sizes:
+            with self.subTest(pattern='zeros', size=size):
+                # All zero bytes
+                data = b'\x00' * size
+                encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+                decoded = binascii.a2b_base64(self.type2test(encoded))
+                self.assertEqual(decoded, data)
+
+            with self.subTest(pattern='ones', size=size):
+                # All 0xFF bytes
+                data = b'\xff' * size
+                encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+                decoded = binascii.a2b_base64(self.type2test(encoded))
+                self.assertEqual(decoded, data)
+
+            with self.subTest(pattern='alternating', size=size):
+                # Alternating 0x00 and 0xFF
+                data = bytes([0x00 if i % 2 == 0 else 0xFF for i in range(size)])
+                encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+                decoded = binascii.a2b_base64(self.type2test(encoded))
+                self.assertEqual(decoded, data)
+
+            with self.subTest(pattern='sequential', size=size):
+                # Sequential bytes (0, 1, 2, ..., 255, 0, 1, ...)
+                data = bytes([i % 256 for i in range(size)])
+                encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+                decoded = binascii.a2b_base64(self.type2test(encoded))
+                self.assertEqual(decoded, data)
+
+            with self.subTest(pattern='reverse_sequential', size=size):
+                # Reverse sequential (255, 254, 253, ...)
+                data = bytes([(255 - i) % 256 for i in range(size)])
+                encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+                decoded = binascii.a2b_base64(self.type2test(encoded))
+                self.assertEqual(decoded, data)
+
+    def test_base64_invalid_at_block_boundaries(self):
+        # Test that invalid characters are correctly detected at positions
+        # that correspond to block processing boundaries.
+        # Vectorized implementations may check validity differently at
+        # block boundaries vs within blocks.
+
+        # Create valid base64 strings of specific lengths, then corrupt
+        # a character at a boundary position
+        boundary_positions = [
+            (16, 15),   # Last char of 16-char block
+            (32, 31),   # Last char of 32-char block
+            (64, 63),   # Last char of 64-char block
+            (16, 0),    # First char of 16-char block
+            (32, 16),   # First char of second 16-char block
+            (64, 32),   # Middle of 64-char block
+        ]
+
+        for encoded_len, corrupt_pos in boundary_positions:
+            # Need input that produces exactly encoded_len base64 chars
+            # encoded_len chars = (encoded_len * 3 / 4) input bytes
+            input_len = (encoded_len * 3) // 4
+            with self.subTest(encoded_len=encoded_len, corrupt_pos=corrupt_pos):
+                data = bytes(range(input_len))
+                encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+                self.assertEqual(len(encoded), encoded_len)
+
+                # Replace a character with a different valid base64 char
+                # to test that decoding produces different output
+                corrupted = bytearray(encoded)
+                # Replace with 'A' if not already 'A', else 'B'
+                corrupted[corrupt_pos] = ord('B') if encoded[corrupt_pos] == ord('A') else ord('A')
+                corrupted = bytes(corrupted)
+
+                result = binascii.a2b_base64(self.type2test(corrupted))
+                # Result should differ from original due to corrupted char
+                self.assertNotEqual(result, data)
+
+                # Also test with an actual invalid character in strict mode
+                corrupted_invalid = bytearray(encoded)
+                corrupted_invalid[corrupt_pos] = ord(' ')  # space is ignored in non-strict
+                corrupted_invalid = bytes(corrupted_invalid)
+
+                # Strict mode should reject the invalid character
+                with self.assertRaises(binascii.Error):
+                    binascii.a2b_base64(self.type2test(corrupted_invalid), strict_mode=True)
+
+    def test_base64_multi_block(self):
+        # Test with inputs that span multiple processing blocks.
+        # Vectorized implementations must correctly handle the carry-over
+        # and state between consecutive block iterations.
+        multi_block_sizes = [
+            24,    # 2 × 12-byte blocks
+            48,    # 4 × 12-byte blocks or 2 × 24-byte blocks
+            96,    # 8 × 12-byte blocks or 2 × 48-byte blocks
+            128,   # Tests 64-char decode blocks (128 chars -> 96 bytes)
+            192,   # 4 × 48-byte blocks
+            256,   # Larger multi-block test
+        ]
+
+        for size in multi_block_sizes:
+            with self.subTest(size=size):
+                # Use a pattern that would reveal byte-swapping or
+                # off-by-one errors across block boundaries
+                data = bytes([(i * 7 + 13) % 256 for i in range(size)])
+                encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+                decoded = binascii.a2b_base64(self.type2test(encoded))
+                self.assertEqual(decoded, data)
+
+        # Also test that data is correctly preserved across block boundaries
+        # by checking specific byte positions
+        data = bytes(range(256))
+        encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+        decoded = binascii.a2b_base64(self.type2test(encoded))
+        for i in range(256):
+            self.assertEqual(decoded[i], i, f"Byte at position {i} incorrect")
+
+    def test_base64_padding_at_boundaries(self):
+        # Test inputs that require padding and fall near block boundaries.
+        # Vectorized implementations typically process complete blocks, so
+        # inputs requiring padding exercise the scalar remainder path.
+
+        # Sizes that are not multiples of 3 (require padding)
+        # and are close to common block sizes
+        sizes_requiring_padding = [
+            11,   # Just under 12
+            13,   # Just over 12
+            23,   # Just under 24
+            25,   # Just over 24
+            47,   # Just under 48
+            49,   # Just over 48
+            62,   # 2 mod 3, near 64
+            64,   # 1 mod 3, at 64
+            65,   # 2 mod 3, just over 64
+        ]
+
+        for size in sizes_requiring_padding:
+            with self.subTest(size=size, remainder=size % 3):
+                data = bytes([i % 256 for i in range(size)])
+                encoded = binascii.b2a_base64(self.type2test(data), newline=False)
+
+                # Verify padding is correct
+                if size % 3 == 1:
+                    self.assertTrue(encoded.endswith(b'=='))
+                elif size % 3 == 2:
+                    self.assertTrue(encoded.endswith(b'='))
+                else:
+                    self.assertFalse(encoded.endswith(b'='))
+
+                decoded = binascii.a2b_base64(self.type2test(encoded))
+                self.assertEqual(decoded, data)
+
     def test_c_contiguity(self):
         m = memoryview(bytearray(b'noncontig'))
         noncontig_writable = m[::-2]
