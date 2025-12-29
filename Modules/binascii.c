@@ -1433,6 +1433,9 @@ PyDoc_STRVAR(doc_binascii, "Conversion between binary data and ASCII");
 static int
 binascii_exec(PyObject *module)
 {
+    /* Initialize CPU feature detection for SIMD fast paths */
+    _base64_init_cpu_features();
+
     binascii_state *state = PyModule_GetState(module);
     if (state == NULL) {
         return -1;
