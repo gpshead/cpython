@@ -176,10 +176,14 @@ base64_encode_fast(const unsigned char *in, Py_ssize_t in_len,
     }
 #endif
 
-    /* Process remaining bytes with scalar code */
+    /* Process remaining bytes with scalar code using pointer increment */
     Py_ssize_t n_trios = in_len / 3;
-    for (Py_ssize_t i = 0; i < n_trios; i++) {
-        base64_encode_trio(in + i * 3, out + i * 4, table);
+    const unsigned char *in_end = in + n_trios * 3;
+
+    while (in < in_end) {
+        base64_encode_trio(in, out, table);
+        in += 3;
+        out += 4;
     }
 
     return processed + n_trios * 3;
