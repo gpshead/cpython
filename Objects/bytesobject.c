@@ -2234,14 +2234,28 @@ bytes_translate_impl(PyBytesObject *self, PyObject *table,
     input = PyBytes_AS_STRING(input_obj);
 
     if (dellen == 0 && table_chars != NULL) {
-        /* If no deletions are required, use faster code */
-        for (i = inlen; --i >= 0; ) {
-            c = Py_CHARMASK(*input++);
-            if (Py_CHARMASK((*output++ = table_chars[c])) != c)
-                changed = 1;
+        /* If no deletions are required, use faster code.
+         * Unrolling allows better instruction pipelining. */
+        Py_ssize_t len8 = inlen & ~((Py_ssize_t)7);
+        for (i = 0; i < len8; i += 8) {
+            output[i+0] = table_chars[(unsigned char)input[i+0]];
+            output[i+1] = table_chars[(unsigned char)input[i+1]];
+            output[i+2] = table_chars[(unsigned char)input[i+2]];
+            output[i+3] = table_chars[(unsigned char)input[i+3]];
+            output[i+4] = table_chars[(unsigned char)input[i+4]];
+            output[i+5] = table_chars[(unsigned char)input[i+5]];
+            output[i+6] = table_chars[(unsigned char)input[i+6]];
+            output[i+7] = table_chars[(unsigned char)input[i+7]];
         }
-        if (!changed && PyBytes_CheckExact(input_obj)) {
-            Py_SETREF(result, Py_NewRef(input_obj));
+        for (; i < inlen; i++) {
+            output[i] = table_chars[(unsigned char)input[i]];
+        }
+        /* Check if anything changed (for returning original object) */
+        if (PyBytes_CheckExact(input_obj)) {
+            changed = (memcmp(input, output, inlen) != 0);
+            if (!changed) {
+                Py_SETREF(result, Py_NewRef(input_obj));
+            }
         }
         PyBuffer_Release(&del_table_view);
         PyBuffer_Release(&table_view);
