@@ -67,6 +67,24 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <windows.h>
 #endif
 
+/* SIMD support for str.translate optimization */
+#if defined(__GNUC__) || defined(__clang__)
+#  if defined(__x86_64__)
+#    include <emmintrin.h>  /* SSE2 - baseline for x86-64 */
+#    ifdef __SSSE3__
+#      include <tmmintrin.h>  /* SSSE3 for pshufb */
+#      define _Py_TRANSLATE_HAVE_SSSE3 1
+#    endif
+#    ifdef __AVX2__
+#      include <immintrin.h>
+#      define _Py_TRANSLATE_HAVE_AVX2 1
+#    endif
+#  elif defined(__aarch64__)
+#    include <arm_neon.h>
+#    define _Py_TRANSLATE_HAVE_NEON 1
+#  endif
+#endif
+
 #ifdef HAVE_NON_UNICODE_WCHAR_T_REPRESENTATION
 #  include "pycore_fileutils.h"   // _Py_LocaleUsesNonUnicodeWchar()
 #endif
@@ -9264,6 +9282,241 @@ unicode_fast_translate_lookup(PyObject *mapping, Py_UCS1 ch,
     return ret;
 }
 
+/*
+ * SIMD-accelerated ASCII translation helpers.
+ *
+ * These use the nibble-split lookup technique to perform parallel table
+ * lookups using SSSE3 pshufb, AVX2 vpshufb, or NEON tbl instructions.
+ *
+ * The 128-byte ASCII table is reorganized into 8 rows of 16 bytes each,
+ * indexed by the high nibble (bits 6:4) to select the row and the low
+ * nibble (bits 3:0) to select the column within the row.
+ */
+
+#if defined(_Py_TRANSLATE_HAVE_SSSE3) || defined(_Py_TRANSLATE_HAVE_AVX2)
+/* Reorganize table for nibble-split lookup: 8 rows x 16 columns */
+static inline void
+_Py_translate_reorganize_table(const Py_UCS1 table[128],
+                               Py_UCS1 reorg[8][16])
+{
+    for (int row = 0; row < 8; row++) {
+        for (int col = 0; col < 16; col++) {
+            reorg[row][col] = table[row * 16 + col];
+        }
+    }
+}
+#endif
+
+#ifdef _Py_TRANSLATE_HAVE_SSSE3
+/*
+ * SSSE3 implementation using pshufb for parallel table lookup.
+ * Processes 16 bytes at a time.
+ */
+static inline void
+_Py_translate_ssse3(const Py_UCS1 *in, Py_UCS1 *out, Py_ssize_t len,
+                    const Py_UCS1 reorg[8][16])
+{
+    /* Load the 8 lookup sub-tables */
+    __m128i tables[8];
+    for (int i = 0; i < 8; i++) {
+        tables[i] = _mm_loadu_si128((const __m128i *)reorg[i]);
+    }
+
+    __m128i low_nibble_mask = _mm_set1_epi8(0x0F);
+
+    Py_ssize_t i = 0;
+
+    /* Main SIMD loop - 16 bytes per iteration */
+    while (i + 16 <= len) {
+        __m128i input = _mm_loadu_si128((const __m128i *)(in + i));
+
+        /* Extract nibbles */
+        __m128i low_nibble = _mm_and_si128(input, low_nibble_mask);
+        __m128i high_nibble = _mm_and_si128(
+            _mm_srli_epi16(input, 4), low_nibble_mask);
+
+        /* Perform lookups and blend based on high nibble */
+        __m128i result = _mm_setzero_si128();
+
+        for (int r = 0; r < 8; r++) {
+            __m128i lookup = _mm_shuffle_epi8(tables[r], low_nibble);
+            __m128i row_val = _mm_set1_epi8(r);
+            __m128i mask = _mm_cmpeq_epi8(high_nibble, row_val);
+            result = _mm_or_si128(
+                _mm_and_si128(lookup, mask),
+                _mm_andnot_si128(mask, result)
+            );
+        }
+
+        _mm_storeu_si128((__m128i *)(out + i), result);
+        i += 16;
+    }
+
+    /* Scalar tail */
+    while (i < len) {
+        Py_UCS1 ch = in[i];
+        out[i] = reorg[ch >> 4][ch & 0x0F];
+        i++;
+    }
+}
+#endif /* _Py_TRANSLATE_HAVE_SSSE3 */
+
+#ifdef _Py_TRANSLATE_HAVE_AVX2
+/*
+ * AVX2 implementation - processes 32 bytes at a time.
+ * Uses the same nibble-split technique with 256-bit vectors.
+ */
+static inline void
+_Py_translate_avx2(const Py_UCS1 *in, Py_UCS1 *out, Py_ssize_t len,
+                   const Py_UCS1 reorg[8][16])
+{
+    /* Load tables, duplicated for AVX2 */
+    __m256i tables[8];
+    for (int i = 0; i < 8; i++) {
+        __m128i t = _mm_loadu_si128((const __m128i *)reorg[i]);
+        tables[i] = _mm256_broadcastsi128_si256(t);
+    }
+
+    __m256i low_nibble_mask = _mm256_set1_epi8(0x0F);
+
+    Py_ssize_t i = 0;
+
+    /* Main SIMD loop - 32 bytes per iteration */
+    while (i + 32 <= len) {
+        __m256i input = _mm256_loadu_si256((const __m256i *)(in + i));
+
+        __m256i low_nibble = _mm256_and_si256(input, low_nibble_mask);
+        __m256i high_nibble = _mm256_and_si256(
+            _mm256_srli_epi16(input, 4), low_nibble_mask);
+
+        __m256i result = _mm256_setzero_si256();
+
+        for (int r = 0; r < 8; r++) {
+            __m256i lookup = _mm256_shuffle_epi8(tables[r], low_nibble);
+            __m256i row_val = _mm256_set1_epi8(r);
+            __m256i mask = _mm256_cmpeq_epi8(high_nibble, row_val);
+            result = _mm256_or_si256(
+                _mm256_and_si256(lookup, mask),
+                _mm256_andnot_si256(mask, result)
+            );
+        }
+
+        _mm256_storeu_si256((__m256i *)(out + i), result);
+        i += 32;
+    }
+
+    /* Handle remaining 16+ bytes with SSE */
+#ifdef _Py_TRANSLATE_HAVE_SSSE3
+    if (i + 16 <= len) {
+        __m128i tables128[8];
+        for (int j = 0; j < 8; j++) {
+            tables128[j] = _mm_loadu_si128((const __m128i *)reorg[j]);
+        }
+
+        __m128i input = _mm_loadu_si128((const __m128i *)(in + i));
+        __m128i low_nibble = _mm_and_si128(input, _mm_set1_epi8(0x0F));
+        __m128i high_nibble = _mm_and_si128(
+            _mm_srli_epi16(input, 4), _mm_set1_epi8(0x0F));
+
+        __m128i result = _mm_setzero_si128();
+        for (int r = 0; r < 8; r++) {
+            __m128i lookup = _mm_shuffle_epi8(tables128[r], low_nibble);
+            __m128i mask = _mm_cmpeq_epi8(high_nibble, _mm_set1_epi8(r));
+            result = _mm_or_si128(
+                _mm_and_si128(lookup, mask),
+                _mm_andnot_si128(mask, result)
+            );
+        }
+        _mm_storeu_si128((__m128i *)(out + i), result);
+        i += 16;
+    }
+#endif
+
+    /* Scalar tail */
+    while (i < len) {
+        Py_UCS1 ch = in[i];
+        out[i] = reorg[ch >> 4][ch & 0x0F];
+        i++;
+    }
+}
+#endif /* _Py_TRANSLATE_HAVE_AVX2 */
+
+#ifdef _Py_TRANSLATE_HAVE_NEON
+/*
+ * ARM NEON implementation using tbl instruction for table lookup.
+ */
+static inline void
+_Py_translate_neon(const Py_UCS1 *in, Py_UCS1 *out, Py_ssize_t len,
+                   const Py_UCS1 table[128])
+{
+    /* Load the table as 8 NEON vectors (16 bytes each) */
+    uint8x16_t tables[8];
+    for (int i = 0; i < 8; i++) {
+        tables[i] = vld1q_u8(&table[i * 16]);
+    }
+
+    uint8x16_t low_nibble_mask = vdupq_n_u8(0x0F);
+
+    Py_ssize_t i = 0;
+
+    while (i + 16 <= len) {
+        uint8x16_t input = vld1q_u8(in + i);
+
+        /* Extract nibbles */
+        uint8x16_t low_nibble = vandq_u8(input, low_nibble_mask);
+        uint8x16_t high_nibble = vandq_u8(vshrq_n_u8(input, 4), low_nibble_mask);
+
+        /* Perform lookups using vqtbl1q and blend */
+        uint8x16_t result = vdupq_n_u8(0);
+
+        for (int r = 0; r < 8; r++) {
+            uint8x16_t lookup = vqtbl1q_u8(tables[r], low_nibble);
+            uint8x16_t row_val = vdupq_n_u8(r);
+            uint8x16_t mask = vceqq_u8(high_nibble, row_val);
+            result = vorrq_u8(
+                vandq_u8(lookup, mask),
+                vbicq_u8(result, mask)
+            );
+        }
+
+        vst1q_u8(out + i, result);
+        i += 16;
+    }
+
+    /* Scalar tail */
+    while (i < len) {
+        out[i] = table[in[i]];
+        i++;
+    }
+}
+#endif /* _Py_TRANSLATE_HAVE_NEON */
+
+/*
+ * Main SIMD dispatch function for ASCII translation.
+ * Called when the translation table is fully populated with no deletions.
+ */
+static inline void
+_Py_translate_simd(const Py_UCS1 *in, Py_UCS1 *out, Py_ssize_t len,
+                   const Py_UCS1 table[128])
+{
+#if defined(_Py_TRANSLATE_HAVE_AVX2)
+    Py_UCS1 reorg[8][16];
+    _Py_translate_reorganize_table(table, reorg);
+    _Py_translate_avx2(in, out, len, reorg);
+#elif defined(_Py_TRANSLATE_HAVE_SSSE3)
+    Py_UCS1 reorg[8][16];
+    _Py_translate_reorganize_table(table, reorg);
+    _Py_translate_ssse3(in, out, len, reorg);
+#elif defined(_Py_TRANSLATE_HAVE_NEON)
+    _Py_translate_neon(in, out, len, table);
+#else
+    /* Scalar fallback */
+    for (Py_ssize_t i = 0; i < len; i++) {
+        out[i] = table[in[i]];
+    }
+#endif
+}
+
 /* Fast path for ascii => ascii translation. Return 1 if the whole string
    was translated into writer, return 0 if the input string was partially
    translated into writer, raise an exception and return -1 on error. */
@@ -9274,15 +9527,17 @@ unicode_fast_translate(PyObject *input, PyObject *mapping,
 {
     Py_UCS1 ascii_table[128], ch, ch2;
     Py_ssize_t len;
-    const Py_UCS1 *in, *end;
+    const Py_UCS1 *in, *end, *in_start;
     Py_UCS1 *out;
     int res = 0;
+    int has_deletion = 0;  /* Track if any 0xfe (deletion) markers seen */
 
     len = PyUnicode_GET_LENGTH(input);
 
     memset(ascii_table, 0xff, 128);
 
     in = PyUnicode_1BYTE_DATA(input);
+    in_start = in;
     end = in + len;
 
     assert(PyUnicode_IS_ASCII(writer->buffer));
@@ -9302,6 +9557,7 @@ unicode_fast_translate(PyObject *input, PyObject *mapping,
             ch2 = ascii_table[ch];
         }
         if (ch2 == 0xfe) {
+            has_deletion = 1;
             if (ignore)
                 continue;
             goto exit;
@@ -9309,6 +9565,42 @@ unicode_fast_translate(PyObject *input, PyObject *mapping,
         assert(ch2 < 128);
         *out = ch2;
         out++;
+
+        /*
+         * SIMD optimization: After processing 64+ bytes without hitting
+         * any deletion markers, check if we can switch to SIMD for the
+         * remaining data. This requires:
+         * 1. No deletions in the translation
+         * 2. All remaining characters are in the already-populated table
+         *
+         * The check is only done every 64 bytes to minimize overhead.
+         */
+#if defined(_Py_TRANSLATE_HAVE_AVX2) || defined(_Py_TRANSLATE_HAVE_SSSE3) || \
+    defined(_Py_TRANSLATE_HAVE_NEON)
+        if (!has_deletion &&
+            (in - in_start) >= 64 &&
+            ((in - in_start) & 63) == 0 &&  /* Check every 64 bytes */
+            (end - in) >= 32)  /* At least 32 bytes remaining */
+        {
+            /* Check if all remaining characters are already in the table */
+            const Py_UCS1 *check = in + 1;
+            int can_use_simd = 1;
+            while (check < end && can_use_simd) {
+                if (ascii_table[*check] >= 0xfe) {
+                    can_use_simd = 0;
+                }
+                check++;
+            }
+
+            if (can_use_simd) {
+                /* All remaining chars are known - use SIMD for the rest */
+                Py_ssize_t remaining = end - in - 1;
+                _Py_translate_simd(in + 1, out, remaining, ascii_table);
+                out += remaining;
+                in = end - 1;  /* Will be incremented by loop */
+            }
+        }
+#endif
     }
     res = 1;
 
