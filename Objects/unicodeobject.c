@@ -9449,34 +9449,43 @@ unicode_fast_translate(PyObject *input, PyObject *mapping,
         out++;
 
         /*
-         * SIMD optimization: After processing 64+ bytes without hitting
-         * any deletion markers, check if we can switch to SIMD for the
-         * remaining data. This requires:
-         * 1. No deletions in the translation
-         * 2. All remaining characters are in the already-populated table
+         * SIMD optimization: For large strings (>= 1KB), after processing
+         * enough bytes to populate the translation table, switch to SIMD.
          *
-         * The check is only done every 64 bytes to minimize overhead.
+         * Requirements:
+         * 1. Total string length >= 1024 (avoid small-string overhead)
+         * 2. No deletions in the translation (SIMD can't handle length changes)
+         * 3. Processed 256 bytes (table likely populated for input charset)
+         * 4. At least 512 bytes remaining (worth the SIMD setup cost)
+         *
+         * Single check at 256-byte mark to minimize overhead.
          */
 #ifdef _Py_TRANSLATE_HAVE_SIMD
-        if (!has_deletion &&
-            (in - in_start) >= 64 &&
-            ((in - in_start) & 63) == 0 &&  /* Check every 64 bytes */
-            (end - in) >= 32)  /* At least 32 bytes remaining */
+        if (len >= 1024 &&
+            !has_deletion &&
+            (in - in_start) == 255 &&  /* Check once at 256-byte mark */
+            (end - in) >= 512)  /* Enough remaining to benefit */
         {
-            /* Check if all remaining characters are already in the table */
-            const Py_UCS1 *check = in + 1;
-            int can_use_simd = 1;
-            while (check < end && can_use_simd) {
-                if (ascii_table[*check] >= 0xfe) {
-                    can_use_simd = 0;
+            const Py_UCS1 *simd_start = in + 1;
+            Py_ssize_t remaining = end - simd_start;
+
+            /* Sample check: verify table is populated for remaining chars.
+             * Check every 64th byte - if any is unknown (0xff) or delete
+             * (0xfe), skip SIMD. This catches most cases without full scan. */
+            int can_simd = 1;
+            for (Py_ssize_t j = 0; j < remaining; j += 64) {
+                if (ascii_table[simd_start[j]] >= 0xfe) {
+                    can_simd = 0;
+                    break;
                 }
-                check++;
+            }
+            /* Also check the last byte */
+            if (can_simd && ascii_table[simd_start[remaining - 1]] >= 0xfe) {
+                can_simd = 0;
             }
 
-            if (can_use_simd) {
-                /* All remaining chars are known - use SIMD for the rest */
-                Py_ssize_t remaining = end - in - 1;
-                _Py_translate_simd(in + 1, out, remaining, ascii_table);
+            if (can_simd) {
+                _Py_translate_simd(simd_start, out, remaining, ascii_table);
                 out += remaining;
                 in = end - 1;  /* Will be incremented by loop */
             }
