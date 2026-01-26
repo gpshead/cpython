@@ -9115,13 +9115,33 @@ unicode_translate_call_errorhandler(const char *errors,
 static int
 charmaptranslate_lookup(Py_UCS4 c, PyObject *mapping, PyObject **result, Py_UCS4 *replace)
 {
-    PyObject *w = PyLong_FromLong((long)c);
+    PyObject *w;
     PyObject *x;
+    int rc;
 
-    if (w == NULL)
-        return -1;
-    int rc = PyMapping_GetOptionalItem(mapping, w, &x);
+    /* Optimization: For characters 0-255, use the small int singleton cache.
+       This avoids memory allocation and deallocation for the key object.
+       _PyLong_FromUnsignedChar returns an immortal singleton that doesn't
+       need to be decref'd (but we do it anyway for code simplicity). */
+    if (c < 256) {
+        w = _PyLong_FromUnsignedChar((unsigned char)c);
+        /* w is an immortal singleton, but we handle it uniformly below */
+    }
+    else {
+        w = PyLong_FromLong((long)c);
+        if (w == NULL)
+            return -1;
+    }
+
+    /* Fast path for dict mappings: use PyDict_GetItemRef directly */
+    if (PyDict_CheckExact(mapping)) {
+        rc = PyDict_GetItemRef(mapping, w, &x);
+    }
+    else {
+        rc = PyMapping_GetOptionalItem(mapping, w, &x);
+    }
     Py_DECREF(w);
+
     if (rc == 0) {
         /* No mapping found means: use 1:1 mapping. */
         *result = NULL;
