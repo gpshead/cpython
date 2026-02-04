@@ -3628,6 +3628,28 @@ class POSIXProcessTestCase(BaseTestCase):
                 # Ensure neither vfork() or clone(..., flags=...|CLONE_VFORK|...).
                 self.assertNotRegex(non_vfork_result.event_bytes, br"(?i)vfork")
 
+    def test_popen_timeout_basic(self):
+        """Test that Popen timeout doesn't interfere with normal operation."""
+        # A generous timeout should not affect a quick command
+        p = subprocess.Popen([sys.executable, "-c", "pass"],
+                             timeout=60)
+        p.wait()
+        self.assertEqual(p.returncode, 0)
+
+    def test_popen_timeout_invalid_type(self):
+        """Test that Popen timeout raises TypeError for invalid types."""
+        with self.assertRaises(TypeError) as cm:
+            subprocess.Popen([sys.executable, "-c", "pass"],
+                             timeout="invalid")
+        self.assertIn("timeout must be a number", str(cm.exception))
+
+    def test_popen_timeout_negative(self):
+        """Test that Popen timeout raises ValueError for negative values."""
+        with self.assertRaises(ValueError) as cm:
+            subprocess.Popen([sys.executable, "-c", "pass"],
+                             timeout=-1)
+        self.assertIn("timeout must be non-negative", str(cm.exception))
+
 
 @unittest.skipUnless(mswindows, "Windows specific tests")
 class Win32ProcessTestCase(BaseTestCase):
@@ -3882,6 +3904,14 @@ class Win32ProcessTestCase(BaseTestCase):
 
     def test_terminate_dead(self):
         self._kill_dead_process('terminate')
+
+    def test_popen_timeout_not_supported(self):
+        """Test that Popen timeout raises ValueError on Windows."""
+        with self.assertRaises(ValueError) as cm:
+            subprocess.Popen([sys.executable, "-c", "pass"],
+                             timeout=60)
+        self.assertIn("timeout is not supported on Windows",
+                      str(cm.exception))
 
 class MiscTests(unittest.TestCase):
 

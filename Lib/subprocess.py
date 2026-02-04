@@ -550,6 +550,10 @@ def run(*popenargs,
         kwargs['stdout'] = PIPE
         kwargs['stderr'] = PIPE
 
+    # Pass timeout to Popen on POSIX to cover the exec phase
+    if timeout is not None and not _mswindows:
+        kwargs['timeout'] = timeout
+
     with Popen(*popenargs, **kwargs) as process:
         try:
             stdout, stderr = process.communicate(input, timeout=timeout)
@@ -807,6 +811,14 @@ class Popen:
       encoding and errors: Text mode encoding and error handling to use for
           file objects stdin, stdout and stderr.
 
+      timeout (POSIX only): Maximum time in seconds to wait for the
+          child process to execute (i.e., for exec() to succeed). If the
+          timeout expires, TimeoutExpired is raised and the child process
+          is killed. This is useful in environments where exec() can be
+          delayed by system tools like ptrace or high-latency filesystems.
+          When using subprocess.run(), its timeout parameter is automatically
+          passed to Popen.
+
     Attributes:
         stdin, stdout, stderr, pid, returncode
     """
@@ -820,7 +832,7 @@ class Popen:
                  restore_signals=True, start_new_session=False,
                  pass_fds=(), *, user=None, group=None, extra_groups=None,
                  encoding=None, errors=None, text=None, umask=-1, pipesize=-1,
-                 process_group=None):
+                 process_group=None, timeout=None):
         """Create new Popen instance."""
         if not _can_fork_exec:
             raise OSError(
@@ -865,6 +877,16 @@ class Popen:
             if creationflags != 0:
                 raise ValueError("creationflags is only supported on Windows "
                                  "platforms")
+
+        if _mswindows and timeout is not None:
+            raise ValueError("timeout is not supported on Windows "
+                             "platforms")
+
+        if timeout is not None:
+            if not isinstance(timeout, (int, float)):
+                raise TypeError("timeout must be a number or None")
+            if timeout < 0:
+                raise ValueError("timeout must be non-negative")
 
         self.args = args
         self.stdin = None
@@ -1042,7 +1064,8 @@ class Popen:
                                 errread, errwrite,
                                 restore_signals,
                                 gid, gids, uid, umask,
-                                start_new_session, process_group)
+                                start_new_session, process_group,
+                                timeout)
         except:
             # Cleanup if the child failed starting.
             for f in filter(None, (self.stdin, self.stdout, self.stderr)):
@@ -1455,7 +1478,8 @@ class Popen:
                            unused_restore_signals,
                            unused_gid, unused_gids, unused_uid,
                            unused_umask,
-                           unused_start_new_session, unused_process_group):
+                           unused_start_new_session, unused_process_group,
+                           unused_timeout):
             """Execute program (MS Windows version)"""
 
             assert not pass_fds, "pass_fds not supported on Windows."
@@ -1829,7 +1853,8 @@ class Popen:
                            errread, errwrite,
                            restore_signals,
                            gid, gids, uid, umask,
-                           start_new_session, process_group):
+                           start_new_session, process_group,
+                           timeout):
             """Execute program (POSIX version)"""
 
             if isinstance(args, (str, bytes)):
@@ -1937,11 +1962,36 @@ class Popen:
                 # Wait for exec to fail or succeed; possibly raising an
                 # exception (limited in size)
                 errpipe_data = bytearray()
-                while True:
-                    part = os.read(errpipe_read, 50000)
-                    errpipe_data += part
-                    if not part or len(errpipe_data) > 50000:
-                        break
+                if timeout is not None:
+                    endtime = _time() + timeout
+                    # Use non-blocking reads with select for timeout support
+                    os.set_blocking(errpipe_read, False)
+                    with _PopenSelector() as selector:
+                        selector.register(errpipe_read, selectors.EVENT_READ)
+                        while True:
+                            remaining = endtime - _time()
+                            if remaining <= 0:
+                                # Timeout expired - kill the child and raise
+                                try:
+                                    os.kill(self.pid, signal.SIGKILL)
+                                except ProcessLookupError:
+                                    pass  # Child already exited
+                                raise TimeoutExpired(self.args, timeout)
+                            ready = selector.select(remaining)
+                            if ready:
+                                try:
+                                    part = os.read(errpipe_read, 50000)
+                                except BlockingIOError:
+                                    continue  # No data yet, select again
+                                errpipe_data += part
+                                if not part or len(errpipe_data) > 50000:
+                                    break
+                else:
+                    while True:
+                        part = os.read(errpipe_read, 50000)
+                        errpipe_data += part
+                        if not part or len(errpipe_data) > 50000:
+                            break
             finally:
                 # be sure the FD is closed no matter what
                 os.close(errpipe_read)

@@ -1,0 +1,7 @@
+Add ``timeout`` parameter to :class:`subprocess.Popen` (POSIX only).
+This allows setting a timeout for the child process to execute (exec() to
+succeed). If the timeout expires, :exc:`subprocess.TimeoutExpired` is raised
+and the child process is killed. :func:`subprocess.run` now passes its
+``timeout`` parameter to ``Popen``, so the timeout also covers the exec phase.
+This is useful in environments where exec() can be delayed by system tools
+like ptrace or high-latency filesystems.
