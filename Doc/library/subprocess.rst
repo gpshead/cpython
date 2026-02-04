@@ -34,6 +34,15 @@ The recommended approach to invoking subprocesses is to use the :func:`run`
 function for all use cases it can handle. For more advanced use cases, the
 underlying :class:`Popen` interface can be used directly.
 
+.. tip::
+
+   **Quick Start:** Most users only need :func:`run`. It handles process
+   execution, output capture, timeout, and error checking. See the
+   :ref:`subprocess-run-examples` below for common patterns.
+
+   For long-running processes or interactive communication, use
+   :class:`Popen` directly.
+
 
 .. function:: run(args, *, stdin=None, input=None, stdout=None, stderr=None,\
                   capture_output=False, shell=False, cwd=None, timeout=None, \
@@ -47,8 +56,16 @@ underlying :class:`Popen` interface can be used directly.
    in :ref:`frequently-used-arguments` (hence the use of keyword-only notation
    in the abbreviated signature). The full function signature is largely the
    same as that of the :class:`Popen` constructor - most of the arguments to
-   this function are passed through to that interface. (*timeout*,  *input*,
+   this function are passed through to that interface. (*timeout*, *input*,
    *check*, and *capture_output* are not.)
+
+   .. note::
+
+      **Arguments accepted by** :func:`run` **include all** :class:`Popen`
+      **arguments.** For example, *cwd*, *env*, *shell*, and all other
+      :class:`Popen` arguments can be passed to :func:`run`. See the
+      :class:`Popen` constructor documentation for the complete list of
+      accepted arguments and their detailed descriptions.
 
    If *capture_output* is true, stdout and stderr will be captured.
    When used, the internal :class:`Popen` object is automatically created with
@@ -92,7 +109,11 @@ underlying :class:`Popen` interface can be used directly.
    or bytes to bytes on POSIX platforms much like :data:`os.environ` or
    :data:`os.environb`.
 
-   Examples::
+   .. _subprocess-run-examples:
+
+   **Examples**
+
+   Basic usage::
 
       >>> subprocess.run(["ls", "-l"])  # doesn't capture output
       CompletedProcess(args=['ls', '-l'], returncode=0)
@@ -270,9 +291,16 @@ Frequently Used Arguments
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To support a wide variety of use cases, the :class:`Popen` constructor (and
-the convenience functions) accept a large number of optional arguments. For
-most typical use cases, many of these arguments can be safely left at their
-default values. The arguments that are most commonly needed are:
+the convenience functions such as :func:`run`) accept a large number of optional
+arguments. For most typical use cases, many of these arguments can be safely
+left at their default values.
+
+The arguments described in this section are the most commonly used and apply
+to both :func:`run` and :class:`Popen` unless otherwise noted. The
+:class:`Popen` constructor documentation provides the authoritative reference
+for all arguments.
+
+The arguments that are most commonly needed are:
 
    *args* is required for all calls and should be a string, or a sequence of
    program arguments. Providing a sequence of arguments is generally
@@ -1186,8 +1214,19 @@ Older high-level API
 --------------------
 
 Prior to Python 3.5, these three functions comprised the high level API to
-subprocess. You can now use :func:`run` in many cases, but lots of existing code
-calls these functions.
+subprocess.
+
+.. note::
+
+   **For new code, use** :func:`run` **instead.** The :func:`run` function
+   provides a more consistent interface and is the recommended approach:
+
+   * ``call(...)`` → ``run(...).returncode``
+   * ``check_call(...)`` → ``run(..., check=True)``
+   * ``check_output(...)`` → ``run(..., check=True, stdout=PIPE).stdout``
+
+These functions remain available for backwards compatibility and are still
+found in existing code.
 
 .. function:: call(args, *, stdin=None, stdout=None, stderr=None, \
                    shell=False, cwd=None, timeout=None, **other_popen_kwargs)
