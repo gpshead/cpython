@@ -1,0 +1,4 @@
+Increase the truncation limit for type names (``tp_name``) in error messages
+from 100 or 200 characters to 250 characters consistently across
+:file:`Objects/object.c`. This improves debugging for C++ extension modules
+with long namespace-qualified class names.

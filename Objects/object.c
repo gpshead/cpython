@@ -1078,7 +1078,7 @@ do_richcompare(PyThreadState *tstate, PyObject *v, PyObject *w, int op)
         break;
     default:
         _PyErr_Format(tstate, PyExc_TypeError,
-                      "'%s' not supported between instances of '%.100s' and '%.100s'",
+                      "'%s' not supported between instances of '%.250s' and '%.250s'",
                       opstrings[op],
                       Py_TYPE(v)->tp_name,
                       Py_TYPE(w)->tp_name);
@@ -1144,7 +1144,7 @@ PyObject_RichCompareBool(PyObject *v, PyObject *w, int op)
 Py_hash_t
 PyObject_HashNotImplemented(PyObject *v)
 {
-    PyErr_Format(PyExc_TypeError, "unhashable type: '%.200s'",
+    PyErr_Format(PyExc_TypeError, "unhashable type: '%.250s'",
                  Py_TYPE(v)->tp_name);
     return -1;
 }
@@ -1306,7 +1306,7 @@ PyObject_GetAttr(PyObject *v, PyObject *name)
     PyTypeObject *tp = Py_TYPE(v);
     if (!PyUnicode_Check(name)) {
         PyErr_Format(PyExc_TypeError,
-                     "attribute name must be string, not '%.200s'",
+                     "attribute name must be string, not '%.250s'",
                      Py_TYPE(name)->tp_name);
         return NULL;
     }
@@ -1324,7 +1324,7 @@ PyObject_GetAttr(PyObject *v, PyObject *name)
     }
     else {
         PyErr_Format(PyExc_AttributeError,
-                    "'%.100s' object has no attribute '%U'",
+                    "'%.250s' object has no attribute '%U'",
                     tp->tp_name, name);
     }
 
@@ -1341,7 +1341,7 @@ PyObject_GetOptionalAttr(PyObject *v, PyObject *name, PyObject **result)
 
     if (!PyUnicode_Check(name)) {
         PyErr_Format(PyExc_TypeError,
-                     "attribute name must be string, not '%.200s'",
+                     "attribute name must be string, not '%.250s'",
                      Py_TYPE(name)->tp_name);
         *result = NULL;
         return -1;
@@ -1468,7 +1468,7 @@ PyObject_SetAttr(PyObject *v, PyObject *name, PyObject *value)
 
     if (!PyUnicode_Check(name)) {
         PyErr_Format(PyExc_TypeError,
-                     "attribute name must be string, not '%.200s'",
+                     "attribute name must be string, not '%.250s'",
                      Py_TYPE(name)->tp_name);
         return -1;
     }
@@ -1494,14 +1494,14 @@ PyObject_SetAttr(PyObject *v, PyObject *name, PyObject *value)
     _PyObject_ASSERT(name, Py_REFCNT(name) >= 1);
     if (tp->tp_getattr == NULL && tp->tp_getattro == NULL)
         PyErr_Format(PyExc_TypeError,
-                     "'%.100s' object has no attributes "
+                     "'%.250s' object has no attributes "
                      "(%s .%U)",
                      tp->tp_name,
                      value==NULL ? "del" : "assign to",
                      name);
     else
         PyErr_Format(PyExc_TypeError,
-                     "'%.100s' object has only read-only attributes "
+                     "'%.250s' object has only read-only attributes "
                      "(%s .%U)",
                      tp->tp_name,
                      value==NULL ? "del" : "assign to",
@@ -1582,7 +1582,7 @@ PyObject *
 _PyObject_NextNotImplemented(PyObject *self)
 {
     PyErr_Format(PyExc_TypeError,
-                 "'%.200s' object is not iterable",
+                 "'%.250s' object is not iterable",
                  Py_TYPE(self)->tp_name);
     return NULL;
 }
@@ -1683,7 +1683,7 @@ _PyObject_GetMethod(PyObject *obj, PyObject *name, PyObject **method)
     }
 
     PyErr_Format(PyExc_AttributeError,
-                 "'%.100s' object has no attribute '%U'",
+                 "'%.250s' object has no attribute '%U'",
                  tp->tp_name, name);
 
     _PyObject_SetAttributeErrorContext(obj, name);
@@ -1786,7 +1786,7 @@ _PyObject_GetMethodStackRef(PyThreadState *ts, PyObject *obj,
     }
 
     PyErr_Format(PyExc_AttributeError,
-                 "'%.100s' object has no attribute '%U'",
+                 "'%.250s' object has no attribute '%U'",
                  tp->tp_name, name);
 
     _PyObject_SetAttributeErrorContext(obj, name);
@@ -1814,7 +1814,7 @@ _PyObject_GenericGetAttrWithDict(PyObject *obj, PyObject *name,
 
     if (!PyUnicode_Check(name)){
         PyErr_Format(PyExc_TypeError,
-                     "attribute name must be string, not '%.200s'",
+                     "attribute name must be string, not '%.250s'",
                      Py_TYPE(name)->tp_name);
         return NULL;
     }
@@ -1909,7 +1909,7 @@ _PyObject_GenericGetAttrWithDict(PyObject *obj, PyObject *name,
 
     if (!suppress) {
         PyErr_Format(PyExc_AttributeError,
-                     "'%.100s' object has no attribute '%U'",
+                     "'%.250s' object has no attribute '%U'",
                      tp->tp_name, name);
 
         _PyObject_SetAttributeErrorContext(obj, name);
@@ -1938,7 +1938,7 @@ _PyObject_GenericSetAttrWithDict(PyObject *obj, PyObject *name,
     assert(!PyType_IsSubtype(tp, &PyType_Type));
     if (!PyUnicode_Check(name)){
         PyErr_Format(PyExc_TypeError,
-                     "attribute name must be string, not '%.200s'",
+                     "attribute name must be string, not '%.250s'",
                      Py_TYPE(name)->tp_name);
         return -1;
     }
@@ -1984,20 +1984,20 @@ _PyObject_GenericSetAttrWithDict(PyObject *obj, PyObject *name,
             if (descr == NULL) {
                 if (tp->tp_setattro == PyObject_GenericSetAttr) {
                     PyErr_Format(PyExc_AttributeError,
-                                "'%.100s' object has no attribute '%U' and no "
+                                "'%.250s' object has no attribute '%U' and no "
                                 "__dict__ for setting new attributes",
                                 tp->tp_name, name);
                 }
                 else {
                     PyErr_Format(PyExc_AttributeError,
-                                "'%.100s' object has no attribute '%U'",
+                                "'%.250s' object has no attribute '%U'",
                                 tp->tp_name, name);
                 }
                 _PyObject_SetAttributeErrorContext(obj, name);
             }
             else {
                 PyErr_Format(PyExc_AttributeError,
-                            "'%.100s' object attribute '%U' is read-only",
+                            "'%.250s' object attribute '%U' is read-only",
                             tp->tp_name, name);
             }
             goto done;
@@ -2017,7 +2017,7 @@ _PyObject_GenericSetAttrWithDict(PyObject *obj, PyObject *name,
   error_check:
     if (res < 0 && PyErr_ExceptionMatches(PyExc_KeyError)) {
         PyErr_Format(PyExc_AttributeError,
-                        "'%.100s' object has no attribute '%U'",
+                        "'%.250s' object has no attribute '%U'",
                         tp->tp_name, name);
         _PyObject_SetAttributeErrorContext(obj, name);
     }
@@ -2132,7 +2132,7 @@ _dir_locals(void)
     if (!PyList_Check(names)) {
         PyErr_Format(PyExc_TypeError,
             "dir(): expected keys() of locals to be a list, "
-            "not '%.200s'", Py_TYPE(names)->tp_name);
+            "not '%.250s'", Py_TYPE(names)->tp_name);
         Py_DECREF(names);
         return NULL;
     }
