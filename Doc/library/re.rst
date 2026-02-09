@@ -893,7 +893,7 @@ Functions
 
    Compile a regular expression pattern into a :ref:`regular expression object
    <re-objects>`, which can be used for matching using its
-   :func:`~Pattern.prefixmatch` (:func:`~Pattern.match`),
+   :func:`~Pattern.prefixmatch`,
    :func:`~Pattern.search`, and other methods, described below.
 
    The expression's behaviour can be modified by specifying a *flags* value.
@@ -933,16 +933,18 @@ Functions
    (the ``|`` operator).
 
 
-.. function:: match(pattern, string, flags=0)
 .. function:: prefixmatch(pattern, string, flags=0)
+.. function:: match(pattern, string, flags=0)
 
    If zero or more characters at the beginning of *string* match the regular
    expression *pattern*, return a corresponding :class:`~re.Match`.  Return
    ``None`` if the string does not match the pattern; note that this is
    different from a zero-length match.
 
-   Note that even in :const:`MULTILINE` mode, this will only match at the
-   beginning of the string and not at the beginning of each line.
+   .. note::
+
+      Even in :const:`MULTILINE` mode, this will only match at the
+      beginning of the string and not at the beginning of each line.
 
    If you want to locate a match anywhere in *string*, use :func:`search`
    instead (see also :ref:`search-vs-match`).
@@ -1284,8 +1286,8 @@ Regular Expression Objects
       >>> pattern.search("dog", 1)  # No match; search doesn't include the "d"
 
 
-.. method:: Pattern.match(string[, pos[, endpos]])
 .. method:: Pattern.prefixmatch(string[, pos[, endpos]])
+.. method:: Pattern.match(string[, pos[, endpos]])
 
    If zero or more characters at the *beginning* of *string* match this regular
    expression, return a corresponding :class:`~re.Match`. Return ``None`` if the
@@ -1301,9 +1303,6 @@ Regular Expression Objects
       >>> pattern = re.compile("o")
       >>> pattern.prefixmatch("dog")     # No match as "o" is not at the start of "dog".
       >>> pattern.prefixmatch("dog", 1)  # Match as "o" is the 2nd character of "dog".
-      <re.Match object; span=(1, 2), match='o'>
-      >>> pattern.match("dog")           # Same as above.
-      >>> pattern.match("dog", 1)        # Same as above.
       <re.Match object; span=(1, 2), match='o'>
 
    If you want to locate a match anywhere in *string*, use
@@ -1653,10 +1652,10 @@ That last hand, ``"727ak"``, contained a pair, or two of the same valued cards.
 To match this with a regular expression, one could use backreferences as such::
 
    >>> pair_re = re.compile(r".*(.).*\1")
-   >>> displaymatch(pair_re.match("717ak"))     # Pair of 7s.
+   >>> displaymatch(pair_re.prefixmatch("717ak"))     # Pair of 7s.
    "<Match: '717', groups=('7',)>"
-   >>> displaymatch(pair_re.match("718ak"))     # No pairs.
-   >>> displaymatch(pair_re.match("354aa"))     # Pair of aces.
+   >>> displaymatch(pair_re.prefixmatch("718ak"))     # No pairs.
+   >>> displaymatch(pair_re.prefixmatch("354aa"))     # Pair of aces.
    "<Match: '354aa', groups=('a',)>"
 
 To find out what card the pair consists of, one could use the
@@ -1675,15 +1674,6 @@ To find out what card the pair consists of, one could use the
 
    >>> pair_re.prefixmatch("354aa").group(1)
    'a'
-
-The examples above use :meth:`~Pattern.match` and :meth:`~Pattern.prefixmatch`
-interchangeably because they are two names for the same method.
-:meth:`~Pattern.prefixmatch` was added in Python 3.15 as a more explicit name;
-use it when your code does not need to run on older Python versions.
-:meth:`~Pattern.search` with a ``^`` or ``\A`` anchor is equivalent, but using
-an explicit method name is clearer to readers of the code.
-See :ref:`prefixmatch-vs-match` for more on this topic.
-
 
 Simulating scanf()
 ^^^^^^^^^^^^^^^^^^
@@ -1733,22 +1723,20 @@ The equivalent regular expression would be ::
 
 .. _search-vs-match:
 
-search() vs. match()
-^^^^^^^^^^^^^^^^^^^^
+search() vs. prefixmatch()
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. sectionauthor:: Fred L. Drake, Jr. <fdrake@acm.org>
 
 Python offers different primitive operations based on regular expressions:
 
-+ :func:`re.prefixmatch`, also known under the less explicit name
-  :func:`re.match`, checks for a match only at the beginning of the string
++ :func:`re.prefixmatch` checks for a match only at the beginning of the string
 + :func:`re.search` checks for a match anywhere in the string
   (this is what Perl does by default)
 + :func:`re.fullmatch` checks for entire string to be a match
 
 For example::
 
-   >>> re.match("c", "abcdef")        # No match
    >>> re.prefixmatch("c", "abcdef")  # No match
    >>> re.search("c", "abcdef")       # Match
    <re.Match object; span=(2, 3), match='c'>
@@ -1759,18 +1747,16 @@ For example::
 Regular expressions beginning with ``'^'`` can be used with :func:`search` to
 restrict the match at the beginning of the string::
 
-   >>> re.match("c", "abcdef")        # No match
    >>> re.prefixmatch("c", "abcdef")  # No match
    >>> re.search("^c", "abcdef")      # No match
    >>> re.search("^a", "abcdef")      # Match
    <re.Match object; span=(0, 1), match='a'>
 
-Note however that in :const:`MULTILINE` mode :func:`match` only matches at the
+Note however that in :const:`MULTILINE` mode :func:`prefixmatch` only matches at the
 beginning of the string, whereas using :func:`search` with a regular expression
 beginning with ``'^'`` will match at the beginning of each line. ::
 
    >>> re.prefixmatch("X", "A\nB\nX", re.MULTILINE)  # No match
-   >>> re.match("X", "A\nB\nX", re.MULTILINE)  # No match
    >>> re.search("^X", "A\nB\nX", re.MULTILINE)  # Match
    <re.Match object; span=(4, 5), match='X'>
 
@@ -1779,8 +1765,8 @@ beginning with ``'^'`` will match at the beginning of each line. ::
 prefixmatch() vs. match()
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Why is the :func:`~re.match` function and method name being discouraged in
-favor of the longer :func:`~re.prefixmatch` spelling in very recent Python?
+Why is the :func:`~re.match` function and method discouraged in
+favor of the longer :func:`~re.prefixmatch` spelling?
 
 Many other languages have gained regex support libraries since regular
 expressions were added to Python. However in the most popular of those, they
@@ -1796,8 +1782,8 @@ understand the intended semantics. When reading :func:`~re.match` there remains
 a seed of doubt about the intended behavior to anyone not already familiar with
 this old Python gotcha.
 
-We will **never** remove the original :func:`~re.match` name, as it has been
-used in code for over 30 years.
+We **do not** plan to deprecate and remove the older *match* name,
+if ever, as it has been used in code for over 30 years.
 
 .. versionadded:: next
 

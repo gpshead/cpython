@@ -165,7 +165,7 @@ def prefixmatch(pattern, string, flags=0):
     a Match object, or None if no match was found."""
     return _compile(pattern, flags).prefixmatch(string)
 
-# Our original less explicitly clear about the behavior name for prefixmatch.
+# Our original name which was less explicitly clear about the behavior for prefixmatch.
 match = prefixmatch
 
 def fullmatch(pattern, string, flags=0):

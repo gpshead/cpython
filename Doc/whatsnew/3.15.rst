@@ -694,15 +694,6 @@ os.path
   (Contributed by Petr Viktorin for :cve:`2025-4517`.)
 
 
-resource
---------
-
-* Add new constants: :data:`~resource.RLIMIT_NTHR`,
-  :data:`~resource.RLIMIT_UMTXP`, :data:`~resource.RLIMIT_THREADS`,
-  :data:`~resource.RLIM_SAVED_CUR`, and :data:`~resource.RLIM_SAVED_MAX`.
-  (Contributed by Serhiy Storchaka in :gh:`137512`.)
-
-
 re
 --
 
@@ -714,6 +705,15 @@ re
   language regular expression libraries use an API named *match* to mean what
   Python has always called *search*.
   (Contributed by Gregory P. Smith in :gh:`86519`.)
+
+
+resource
+--------
+
+* Add new constants: :data:`~resource.RLIMIT_NTHR`,
+  :data:`~resource.RLIMIT_UMTXP`, :data:`~resource.RLIMIT_THREADS`,
+  :data:`~resource.RLIM_SAVED_CUR`, and :data:`~resource.RLIM_SAVED_MAX`.
+  (Contributed by Serhiy Storchaka in :gh:`137512`.)
 
 
 shelve
