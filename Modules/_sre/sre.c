@@ -3172,7 +3172,11 @@ pattern_richcompare(PyObject *lefto, PyObject *righto, int op)
 
 static PyMethodDef pattern_methods[] = {
     _SRE_SRE_PATTERN_PREFIXMATCH_METHODDEF
-    {"match", NULL},  /* filled in by sre_exec() */
+    /* "match" reuses the prefixmatch Clinic-generated parser and impl
+     * to avoid duplicating the argument parsing boilerplate code. */
+    {"match", _PyCFunction_CAST(_sre_SRE_Pattern_prefixmatch),
+     METH_METHOD|METH_FASTCALL|METH_KEYWORDS,
+     _sre_SRE_Pattern_prefixmatch__doc__},
     _SRE_SRE_PATTERN_FULLMATCH_METHODDEF
     _SRE_SRE_PATTERN_SEARCH_METHODDEF
     _SRE_SRE_PATTERN_SUB_METHODDEF
@@ -3300,7 +3304,11 @@ static PyType_Spec match_spec = {
 
 static PyMethodDef scanner_methods[] = {
     _SRE_SRE_SCANNER_PREFIXMATCH_METHODDEF
-    {"match", NULL},  /* filled in by sre_exec() */
+    /* "match" reuses the prefixmatch Clinic-generated parser and impl
+     * to avoid duplicating the argument parsing boilerplate code. */
+    {"match", _PyCFunction_CAST(_sre_SRE_Scanner_prefixmatch),
+     METH_METHOD|METH_FASTCALL|METH_KEYWORDS,
+     _sre_SRE_Scanner_prefixmatch__doc__},
     _SRE_SRE_SCANNER_SEARCH_METHODDEF
     {NULL, NULL}
 };
@@ -3405,38 +3413,29 @@ do {                                                                \
 } while (0)
 
 
+#ifdef Py_DEBUG
 static void
-copy_prefixmatch_method_def_to_match(PyMethodDef *method_defs)
+_assert_match_aliases_prefixmatch(PyMethodDef *methods)
 {
-    /* We could implement logic to scan the null filled sentry
-     * terminated list for the two method names.  But we're a
-     * bunch of static structs.  We just guarantee their position
-     * and flag deviation from this via debug build assertions.
-     */
-    assert(method_defs);
-    PyMethodDef *prefixmatch_md = &method_defs[0];
-    assert(prefixmatch_md->ml_name != NULL);
+    PyMethodDef *prefixmatch_md = &methods[0];
+    PyMethodDef *match_md = &methods[1];
     assert(strcmp(prefixmatch_md->ml_name, "prefixmatch") == 0);
-
-    PyMethodDef *match_md = &method_defs[1];
-    assert(match_md->ml_name != NULL);
     assert(strcmp(match_md->ml_name, "match") == 0);
-    /* If the public stable C API struct ever changed (!) and
-     * somehow wound up with unexpected layout and alignment
-     * constraints, fix the memcpy below. */
-    assert(offsetof(PyMethodDef, ml_meth) == sizeof(char *));
-    memcpy(&match_md->ml_meth, &prefixmatch_md->ml_meth,
-           sizeof(PyMethodDef) - offsetof(PyMethodDef, ml_meth));
+    assert(match_md->ml_meth == prefixmatch_md->ml_meth);
+    assert(match_md->ml_flags == prefixmatch_md->ml_flags);
+    assert(match_md->ml_doc == prefixmatch_md->ml_doc);
 }
-
+#endif
 
 static int
 sre_exec(PyObject *m)
 {
     _sremodulestate *state;
 
-    copy_prefixmatch_method_def_to_match(pattern_methods);
-    copy_prefixmatch_method_def_to_match(scanner_methods);
+#ifdef Py_DEBUG
+    _assert_match_aliases_prefixmatch(pattern_methods);
+    _assert_match_aliases_prefixmatch(scanner_methods);
+#endif
 
     /* Create heap types */
     state = get_sre_module_state(m);
