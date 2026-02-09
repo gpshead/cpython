@@ -958,12 +958,12 @@ Functions
    older Python versions.
 
    .. versionchanged:: next
-      An alternate :func:`~re.prefixmatch` name with this API was added as a
-      more descriptive explicit name for the behavior of :func:`~re.match`. Use
-      it to more clearly express intent. The norm in other languages and
-      regular expression implementations is to use the term *match* to refer to
-      the behavior of what Python has always called :func:`~re.search`.  See
-      :ref:`prefixmatch-vs-match`.
+      The alternate :func:`~re.prefixmatch` name of this API was added as a
+      more explicitly descriptive name than :func:`~re.match`. Use it to better
+      express intent. The norm in other languages and regular expression
+      implementations is to use the term *match* to refer to the behavior of
+      what Python has always called :func:`~re.search`.
+      See :ref:`prefixmatch-vs-match`.
 
 
 .. function:: fullmatch(pattern, string, flags=0)
@@ -1313,12 +1313,12 @@ Regular Expression Objects
    with older Python versions.
 
    .. versionchanged:: next
-      An alternate :meth:`~Pattern.prefixmatch` name with this API was added as
-      a more descriptive explicit name for the behavior of
-      :meth:`~Pattern.match`. Use it to more clearly express intent. The norm
-      in other languages and regular expression implementations is to use the
-      term *match* to refer to the behavior of what Python has always called
-      :meth:`~Pattern.search`.  See :ref:`prefixmatch-vs-match`.
+      The alternate :meth:`~Pattern.prefixmatch` name of this API was added as
+      a more explicitly descriptive name than :meth:`~Pattern.match`. Use it to
+      better express intent. The norm in other languages and regular expression
+      implementations is to use the term *match* to refer to the behavior of
+      what Python has always called :meth:`~Pattern.search`.
+      See :ref:`prefixmatch-vs-match`.
 
 
 .. method:: Pattern.fullmatch(string[, pos[, endpos]])
@@ -1784,6 +1784,7 @@ this old Python gotcha.
 
 We **do not** plan to deprecate and remove the older *match* name,
 as it has been used in code for over 30 years.
+Code supporting older versions of Python should continue to use *match*.
 
 .. versionadded:: next
 
