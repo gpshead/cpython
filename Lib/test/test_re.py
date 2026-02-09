@@ -564,51 +564,55 @@ class ReTests(unittest.TestCase):
         self.assertEqual(m.group(2, 1), ('b', 'a'))
         self.assertEqual(m.group(Index(2), Index(1)), ('b', 'a'))
 
+    def do_test_match_getitem(self, match_fn):
+        m = match_fn('a')
+        self.assertEqual(m['a1'], 'a')
+        self.assertEqual(m['b2'], None)
+        self.assertEqual(m['c3'], None)
+        self.assertEqual('a1={a1} b2={b2} c3={c3}'.format_map(m), 'a1=a b2=None c3=None')
+        self.assertEqual(m[0], 'a')
+        self.assertEqual(m[1], 'a')
+        self.assertEqual(m[2], None)
+        self.assertEqual(m[3], None)
+        with self.assertRaisesRegex(IndexError, 'no such group'):
+            m['X']
+        with self.assertRaisesRegex(IndexError, 'no such group'):
+            m[-1]
+        with self.assertRaisesRegex(IndexError, 'no such group'):
+            m[4]
+        with self.assertRaisesRegex(IndexError, 'no such group'):
+            m[0, 1]
+        with self.assertRaisesRegex(IndexError, 'no such group'):
+            m[(0,)]
+        with self.assertRaisesRegex(IndexError, 'no such group'):
+            m[(0, 1)]
+        with self.assertRaisesRegex(IndexError, 'no such group'):
+            'a1={a2}'.format_map(m)
+
+        m = match_fn('ac')
+        self.assertEqual(m['a1'], 'a')
+        self.assertEqual(m['b2'], None)
+        self.assertEqual(m['c3'], 'c')
+        self.assertEqual('a1={a1} b2={b2} c3={c3}'.format_map(m), 'a1=a b2=None c3=c')
+        self.assertEqual(m[0], 'ac')
+        self.assertEqual(m[1], 'a')
+        self.assertEqual(m[2], None)
+        self.assertEqual(m[3], 'c')
+
+        # Cannot assign.
+        with self.assertRaises(TypeError):
+            m[0] = 1
+
+        # No len().
+        self.assertRaises(TypeError, len, m)
+
     def test_match_getitem(self):
         pat = re.compile('(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?')
+        self.do_test_match_getitem(pat.match)
 
-        for match_fn in pat.match, pat.prefixmatch:
-            with self.subTest(match_fn.__name__):
-                m = match_fn('a')
-                self.assertEqual(m['a1'], 'a')
-                self.assertEqual(m['b2'], None)
-                self.assertEqual(m['c3'], None)
-                self.assertEqual('a1={a1} b2={b2} c3={c3}'.format_map(m), 'a1=a b2=None c3=None')
-                self.assertEqual(m[0], 'a')
-                self.assertEqual(m[1], 'a')
-                self.assertEqual(m[2], None)
-                self.assertEqual(m[3], None)
-                with self.assertRaisesRegex(IndexError, 'no such group'):
-                    m['X']
-                with self.assertRaisesRegex(IndexError, 'no such group'):
-                    m[-1]
-                with self.assertRaisesRegex(IndexError, 'no such group'):
-                    m[4]
-                with self.assertRaisesRegex(IndexError, 'no such group'):
-                    m[0, 1]
-                with self.assertRaisesRegex(IndexError, 'no such group'):
-                    m[(0,)]
-                with self.assertRaisesRegex(IndexError, 'no such group'):
-                    m[(0, 1)]
-                with self.assertRaisesRegex(IndexError, 'no such group'):
-                    'a1={a2}'.format_map(m)
-
-                m = match_fn('ac')
-                self.assertEqual(m['a1'], 'a')
-                self.assertEqual(m['b2'], None)
-                self.assertEqual(m['c3'], 'c')
-                self.assertEqual('a1={a1} b2={b2} c3={c3}'.format_map(m), 'a1=a b2=None c3=c')
-                self.assertEqual(m[0], 'ac')
-                self.assertEqual(m[1], 'a')
-                self.assertEqual(m[2], None)
-                self.assertEqual(m[3], 'c')
-
-                # Cannot assign.
-                with self.assertRaises(TypeError):
-                    m[0] = 1
-
-                # No len().
-                self.assertRaises(TypeError, len, m)
+    def test_prefixmatch_getitem(self):
+        pat = re.compile('(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?')
+        self.do_test_match_getitem(pat.prefixmatch)
 
     def test_re_fullmatch(self):
         # Issue 16203: Proposal: add re.fullmatch() method.
