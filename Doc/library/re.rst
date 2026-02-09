@@ -1783,7 +1783,7 @@ a seed of doubt about the intended behavior to anyone not already familiar with
 this old Python gotcha.
 
 We **do not** plan to deprecate and remove the older *match* name,
-if ever, as it has been used in code for over 30 years.
+as it has been used in code for over 30 years.
 
 .. versionadded:: next
 
