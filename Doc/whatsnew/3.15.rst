@@ -1182,7 +1182,7 @@ Diego Russo in :gh:`140683` and :gh:`142305`.)
 
 
 Removed
-=======
+========
 
 ctypes
 ------
