@@ -7287,6 +7287,10 @@ _pickle_Unpickler___init___impl(UnpicklerObject *self, PyObject *file,
                                 const char *errors, PyObject *buffers)
 /*[clinic end generated code: output=09f0192649ea3f85 input=ca4c1faea9553121]*/
 {
+    if (PySys_Audit("pickle.Unpickler", "O", file) < 0) {
+        return -1;
+    }
+
     BEGIN_USING_UNPICKLER(self, -1);
     /* In case of multiple __init__() calls, clear previous content. */
     if (self->read != NULL)
@@ -7811,6 +7815,11 @@ _pickle_load_impl(PyObject *module, PyObject *file, int fix_imports,
 /*[clinic end generated code: output=250452d141c23e76 input=46c7c31c92f4f371]*/
 {
     PyObject *result;
+
+    if (PySys_Audit("pickle.load", "O", file) < 0) {
+        return NULL;
+    }
+
     UnpicklerObject *unpickler = _Unpickler_New(module);
 
     if (unpickler == NULL)
@@ -7872,6 +7881,11 @@ _pickle_loads_impl(PyObject *module, PyObject *data, int fix_imports,
 /*[clinic end generated code: output=82ac1e6b588e6d02 input=b3615540d0535087]*/
 {
     PyObject *result;
+
+    if (PySys_Audit("pickle.loads", "O", data) < 0) {
+        return NULL;
+    }
+
     UnpicklerObject *unpickler = _Unpickler_New(module);
 
     if (unpickler == NULL)

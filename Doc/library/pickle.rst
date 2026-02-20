@@ -236,8 +236,13 @@ process more convenient:
    Arguments *file*, *fix_imports*, *encoding*, *errors*, *strict* and *buffers*
    have the same meaning as in the :class:`Unpickler` constructor.
 
+   .. audit-event:: pickle.load file pickle.load
+
    .. versionchanged:: 3.8
       The *buffers* argument was added.
+
+   .. versionchanged:: next
+      Added the ``pickle.load`` audit event.
 
 .. function:: loads(data, /, *, fix_imports=True, encoding="ASCII", errors="strict", buffers=None)
 
@@ -251,8 +256,13 @@ process more convenient:
    Arguments *fix_imports*, *encoding*, *errors*, *strict* and *buffers*
    have the same meaning as in the :class:`Unpickler` constructor.
 
+   .. audit-event:: pickle.loads data pickle.loads
+
    .. versionchanged:: 3.8
       The *buffers* argument was added.
+
+   .. versionchanged:: next
+      Added the ``pickle.loads`` audit event.
 
 
 The :mod:`pickle` module defines three exceptions:
@@ -417,8 +427,13 @@ The :mod:`pickle` module exports three classes, :class:`Pickler`,
    an :ref:`out-of-band <pickle-oob>` buffer view.  Such buffers have been
    given in order to the *buffer_callback* of a Pickler object.
 
+   .. audit-event:: pickle.Unpickler file pickle.Unpickler
+
    .. versionchanged:: 3.8
       The *buffers* argument was added.
+
+   .. versionchanged:: next
+      Added the ``pickle.Unpickler`` audit event.
 
    .. method:: load()
 

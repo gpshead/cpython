@@ -1218,6 +1218,7 @@ class _Unpickler:
         default to 'ASCII' and 'strict', respectively. *encoding* can be
         'bytes' to read these 8-bit string instances as bytes objects.
         """
+        sys.audit('pickle.Unpickler', file)
         self._buffers = iter(buffers) if buffers is not None else None
         self._file_readline = file.readline
         self._file_read = file.read
@@ -1803,6 +1804,7 @@ def _dumps(obj, protocol=None, *, fix_imports=True, buffer_callback=None):
 
 def _load(file, *, fix_imports=True, encoding="ASCII", errors="strict",
           buffers=None):
+    sys.audit('pickle.load', file)
     return _Unpickler(file, fix_imports=fix_imports, buffers=buffers,
                      encoding=encoding, errors=errors).load()
 
@@ -1810,6 +1812,7 @@ def _loads(s, /, *, fix_imports=True, encoding="ASCII", errors="strict",
            buffers=None):
     if isinstance(s, str):
         raise TypeError("Can't load pickle from unicode string")
+    sys.audit('pickle.loads', s)
     file = io.BytesIO(s)
     return _Unpickler(file, fix_imports=fix_imports, buffers=buffers,
                       encoding=encoding, errors=errors).load()
