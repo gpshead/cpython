@@ -15,9 +15,11 @@ def _dump_footer(
     yield ""
     yield "typedef struct {"
     yield "    void (*emit)("
-    yield "        unsigned char *code, unsigned char *data, _PyExecutorObject *executor,"
+    yield "        unsigned char *code, unsigned char *cold_code, unsigned char *data,"
+    yield "        _PyExecutorObject *executor,"
     yield "        const _PyUOpInstruction *instruction, jit_state *state);"
-    yield "    size_t code_size;"
+    yield "    size_t hot_code_size;"
+    yield "    size_t cold_code_size;"
     yield "    size_t data_size;"
     yield "    symbol_mask trampoline_mask;"
     yield "    symbol_mask got_mask;"
@@ -42,35 +44,84 @@ def _dump_footer(
 
 
 def _dump_stencil(opname: str, group: _stencils.StencilGroup) -> typing.Iterator[str]:
+    cold_offset = group.cold_offset
     yield "void"
     yield f"emit_{opname}("
-    yield "    unsigned char *code, unsigned char *data, _PyExecutorObject *executor,"
+    yield "    unsigned char *code, unsigned char *cold_code, unsigned char *data,"
+    yield "    _PyExecutorObject *executor,"
     yield "    const _PyUOpInstruction *instruction, jit_state *state)"
     yield "{"
-    for part, stencil in [("code", group.code), ("data", group.data)]:
-        for line in stencil.disassembly:
-            yield f"    // {line}"
-        stripped = stencil.body.rstrip(b"\x00")
-        if stripped:
-            yield f"    const unsigned char {part}_body[{len(stencil.body)}] = {{"
-            for i in range(0, len(stripped), 8):
-                row = " ".join(f"{byte:#04x}," for byte in stripped[i : i + 8])
-                yield f"        {row}"
-            yield "    };"
+    # Emit hot code body:
+    for line in group.code.disassembly:
+        yield f"    // {line}"
+    if cold_offset:
+        hot_body = group.code.body[:cold_offset]
+        cold_body = group.code.body[cold_offset:]
+    else:
+        hot_body = group.code.body
+        cold_body = bytearray()
+    # Emit hot code body array:
+    hot_stripped = hot_body.rstrip(b"\x00")
+    if hot_stripped:
+        yield f"    const unsigned char code_body[{len(hot_body)}] = {{"
+        for i in range(0, len(hot_stripped), 8):
+            row = " ".join(f"{byte:#04x}," for byte in hot_stripped[i : i + 8])
+            yield f"        {row}"
+        yield "    };"
+    # Emit cold code body array:
+    cold_stripped = cold_body.rstrip(b"\x00")
+    if cold_stripped:
+        yield f"    const unsigned char cold_code_body[{len(cold_body)}] = {{"
+        for i in range(0, len(cold_stripped), 8):
+            row = " ".join(f"{byte:#04x}," for byte in cold_stripped[i : i + 8])
+            yield f"        {row}"
+        yield "    };"
+    # Emit data body array:
+    for line in group.data.disassembly:
+        yield f"    // {line}"
+    data_stripped = group.data.body.rstrip(b"\x00")
+    if data_stripped:
+        yield f"    const unsigned char data_body[{len(group.data.body)}] = {{"
+        for i in range(0, len(data_stripped), 8):
+            row = " ".join(f"{byte:#04x}," for byte in data_stripped[i : i + 8])
+            yield f"        {row}"
+        yield "    };"
     # Data is written first (so relaxations in the code work properly):
-    for part, stencil in [("data", group.data), ("code", group.code)]:
-        if stencil.body.rstrip(b"\x00"):
-            yield f"    memcpy({part}, {part}_body, sizeof({part}_body));"
-        skip = False
-        stencil.holes.sort(key=lambda hole: hole.offset)
-        for hole, pair in itertools.zip_longest(stencil.holes, stencil.holes[1:]):
-            if skip:
-                skip = False
-                continue
-            if pair and (folded := hole.fold(pair, stencil.body)):
-                skip = True
-                hole = folded
-            yield f"    {hole.as_c(part)}"
+    if data_stripped:
+        yield "    memcpy(data, data_body, sizeof(data_body));"
+    # Emit data holes:
+    skip = False
+    group.data.holes.sort(key=lambda hole: hole.offset)
+    for hole, pair in itertools.zip_longest(group.data.holes, group.data.holes[1:]):
+        if skip:
+            skip = False
+            continue
+        if pair and (folded := hole.fold(pair, group.data.body)):
+            skip = True
+            hole = folded
+        yield f"    {hole.as_c('data')}"
+    # Copy hot code:
+    if hot_stripped:
+        yield "    memcpy(code, code_body, sizeof(code_body));"
+    # Copy cold code:
+    if cold_stripped:
+        yield "    memcpy(cold_code, cold_code_body, sizeof(cold_code_body));"
+    # Emit code holes, adjusting location for cold holes:
+    skip = False
+    group.code.holes.sort(key=lambda hole: hole.offset)
+    for hole, pair in itertools.zip_longest(group.code.holes, group.code.holes[1:]):
+        if skip:
+            skip = False
+            continue
+        if pair and (folded := hole.fold(pair, group.code.body)):
+            skip = True
+            hole = folded
+        if cold_offset and hole.offset >= cold_offset:
+            # This hole is in cold code — adjust offset relative to cold_code
+            adjusted = hole.replace(offset=hole.offset - cold_offset)
+            yield f"    {adjusted.as_c('cold_code')}"
+        else:
+            yield f"    {hole.as_c('code')}"
     yield "}"
     yield ""
 

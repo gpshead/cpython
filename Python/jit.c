@@ -642,23 +642,27 @@ _PyJIT_Compile(_PyExecutorObject *executor, const _PyUOpInstruction trace[], siz
 {
     const StencilGroup *group;
     // Loop once to find the total compiled size:
-    size_t code_size = 0;
+    size_t hot_code_size = 0;
+    size_t cold_code_size = 0;
     size_t data_size = 0;
     jit_state state = {0};
     for (size_t i = 0; i < length; i++) {
         const _PyUOpInstruction *instruction = &trace[i];
         group = &stencil_groups[instruction->opcode];
-        state.instruction_starts[i] = code_size;
-        code_size += group->code_size;
+        state.instruction_starts[i] = hot_code_size;
+        hot_code_size += group->hot_code_size;
+        cold_code_size += group->cold_code_size;
         data_size += group->data_size;
         combine_symbol_mask(group->trampoline_mask, state.trampolines.mask);
         combine_symbol_mask(group->got_mask, state.got_symbols.mask);
     }
     group = &stencil_groups[_FATAL_ERROR_r00];
-    code_size += group->code_size;
+    hot_code_size += group->hot_code_size;
+    cold_code_size += group->cold_code_size;
     data_size += group->data_size;
     combine_symbol_mask(group->trampoline_mask, state.trampolines.mask);
     combine_symbol_mask(group->got_mask, state.got_symbols.mask);
+    size_t code_size = hot_code_size + cold_code_size;
     // Calculate the size of the trampolines required by the whole trace
     for (size_t i = 0; i < Py_ARRAY_LENGTH(state.trampolines.mask); i++) {
         state.trampolines.size += _Py_popcount32(state.trampolines.mask[i]) * TRAMPOLINE_SIZE;
@@ -684,12 +688,16 @@ _PyJIT_Compile(_PyExecutorObject *executor, const _PyUOpInstruction trace[], siz
     OPT_STAT_ADD(jit_got_size, state.got_symbols.size);
     OPT_STAT_ADD(jit_padding_size, padding);
     OPT_HIST(total_size, trace_total_memory_hist);
-    // Update the offsets of each instruction:
+    // Update the offsets of each instruction (hot code comes first):
     for (size_t i = 0; i < length; i++) {
         state.instruction_starts[i] += (uintptr_t)memory;
     }
-    // Loop again to emit the code:
+    // Memory layout: [hot code][cold code][trampolines][padding][data][GOT][padding]
+    // Hot code for all uops is laid out contiguously first, improving
+    // instruction cache locality. Cold code (error handling, rare paths)
+    // is placed after all hot code.
     unsigned char *code = memory;
+    unsigned char *cold_code = memory + hot_code_size;
     state.trampolines.mem = memory + code_size;
     unsigned char *data = memory + code_size + state.trampolines.size + code_padding;
     assert(trace[0].opcode == _START_EXECUTOR_r00 || trace[0].opcode == _COLD_EXIT_r00 || trace[0].opcode == _COLD_DYNAMIC_EXIT_r00);
@@ -697,16 +705,19 @@ _PyJIT_Compile(_PyExecutorObject *executor, const _PyUOpInstruction trace[], siz
     for (size_t i = 0; i < length; i++) {
         const _PyUOpInstruction *instruction = &trace[i];
         group = &stencil_groups[instruction->opcode];
-        group->emit(code, data, executor, instruction, &state);
-        code += group->code_size;
+        group->emit(code, cold_code, data, executor, instruction, &state);
+        code += group->hot_code_size;
+        cold_code += group->cold_code_size;
         data += group->data_size;
     }
     // Protect against accidental buffer overrun into data:
     group = &stencil_groups[_FATAL_ERROR_r00];
-    group->emit(code, data, executor, NULL, &state);
-    code += group->code_size;
+    group->emit(code, cold_code, data, executor, NULL, &state);
+    code += group->hot_code_size;
+    cold_code += group->cold_code_size;
     data += group->data_size;
-    assert(code == memory + code_size);
+    assert(code == memory + hot_code_size);
+    assert(cold_code == memory + code_size);
     assert(data == memory + code_size + state.trampolines.size + code_padding + data_size);
     if (mark_executable(memory, total_size)) {
         jit_free(memory, total_size);
@@ -728,14 +739,17 @@ compile_shim(void)
 {
     _PyExecutorObject dummy;
     const StencilGroup *group;
-    size_t code_size = 0;
+    size_t hot_code_size = 0;
+    size_t cold_code_size = 0;
     size_t data_size = 0;
     jit_state state = {0};
     group = &shim;
-    code_size += group->code_size;
+    hot_code_size += group->hot_code_size;
+    cold_code_size += group->cold_code_size;
     data_size += group->data_size;
     combine_symbol_mask(group->trampoline_mask, state.trampolines.mask);
     combine_symbol_mask(group->got_mask, state.got_symbols.mask);
+    size_t code_size = hot_code_size + cold_code_size;
     // Round up to the nearest page:
     size_t page_size = get_page_size();
     assert((page_size & (page_size - 1)) == 0);
@@ -747,6 +761,7 @@ compile_shim(void)
         return NULL;
     }
     unsigned char *code = memory;
+    unsigned char *cold_code = memory + hot_code_size;
     state.trampolines.mem = memory + code_size;
     unsigned char *data = memory + code_size + state.trampolines.size + code_padding;
     state.got_symbols.mem = data + data_size;
@@ -754,10 +769,12 @@ compile_shim(void)
     // calling convention and the calling convention used by jitted code
     // (which may be different for efficiency reasons).
     group = &shim;
-    group->emit(code, data, &dummy, NULL, &state);
-    code += group->code_size;
+    group->emit(code, cold_code, data, &dummy, NULL, &state);
+    code += group->hot_code_size;
+    cold_code += group->cold_code_size;
     data += group->data_size;
-    assert(code == memory + code_size);
+    assert(code == memory + hot_code_size);
+    assert(cold_code == memory + code_size);
     assert(data == memory + code_size + state.trampolines.size + code_padding + data_size);
     if (mark_executable(memory, total_size)) {
         jit_free(memory, total_size);

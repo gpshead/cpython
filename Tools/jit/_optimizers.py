@@ -310,6 +310,72 @@ class Optimizer:
             yield block
             block = block.link
 
+    def _make_jump(self, target: str) -> Instruction:
+        """Create an unconditional jump instruction to the given label."""
+        raise NotImplementedError
+
+    def _reorder_hot_cold(self) -> None:
+        """Reorder blocks so all hot blocks come first, then all cold blocks.
+
+        This improves instruction cache locality by keeping the common execution
+        paths contiguous in memory. A _JIT_COLD_START label is inserted at the
+        boundary between hot and cold code.
+
+        For any hot block that previously fell through to a cold block, an
+        explicit jump is inserted to maintain correctness.
+        """
+        continuation = self._lookup_label(f"{self.label_prefix}_JIT_CONTINUE")
+        hot_blocks: list[_Block] = []
+        cold_blocks: list[_Block] = []
+        # Blocks at and after _JIT_CONTINUE contain metadata; keep them at end
+        post_continuation: list[_Block] = []
+        past_continuation = False
+        for block in self._blocks():
+            if block is continuation:
+                past_continuation = True
+            if past_continuation:
+                post_continuation.append(block)
+            elif block.hot:
+                hot_blocks.append(block)
+            else:
+                cold_blocks.append(block)
+
+        if not cold_blocks:
+            # Nothing to reorder — all code is hot
+            return
+
+        # For any hot block that falls through to a cold block, insert an
+        # explicit jump to maintain correctness after reordering:
+        for block in hot_blocks:
+            if (
+                block.fallthrough
+                and block.link is not None
+                and not block.link.hot
+                and block.link is not continuation
+            ):
+                # The fallthrough target is cold and will be moved away.
+                # Insert a jump to the cold block's label:
+                target_block = block.link.resolve()
+                if target_block.label:
+                    jump = self._make_jump(target_block.label)
+                    block.instructions.append(jump)
+                    block.fallthrough = False
+
+        # Rebuild the linked list: hot -> cold -> post_continuation
+        all_blocks = hot_blocks + cold_blocks + post_continuation
+        for i, block in enumerate(all_blocks):
+            block.link = all_blocks[i + 1] if i + 1 < len(all_blocks) else None
+
+        # Insert the cold start label between hot and cold sections.
+        # Use the symbol_prefix so it appears in the object file's symbol table:
+        if hot_blocks and cold_blocks:
+            cold_label = f"{self.symbol_prefix}_JIT_COLD_START"
+            cold_blocks[0].noninstructions.insert(0, f"{cold_label}:")
+
+        # Update the root to the first block
+        if all_blocks:
+            self._root = all_blocks[0]
+
     def _body(self) -> str:
         lines = ["#" + line for line in self.text.splitlines()]
         hot = True
@@ -563,6 +629,7 @@ class Optimizer:
             self._invert_hot_branches()
             self._remove_redundant_jumps()
             self._remove_unreachable()
+        self._reorder_hot_cold()
         self._fixup_external_labels()
         self._fixup_constants()
         self.path.write_text(self._body())
@@ -579,6 +646,9 @@ class OptimizerAArch64(Optimizer):  # pylint: disable = too-few-public-methods
     _re_branch = re.compile(
         rf"\s*(?P<instruction>{'|'.join(_branch_patterns)})\s+(.+,\s+)*(?P<target>[\w.]+)"
     )
+
+    def _make_jump(self, target: str) -> Instruction:
+        return Instruction(InstructionKind.JUMP, "b", f"\tb {target}", target)
 
     # https://developer.arm.com/documentation/ddi0406/b/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/BL--BLX--immediate-
     _re_call = re.compile(r"\s*blx?\s+(?P<target>[\w.]+)")
@@ -644,6 +714,9 @@ class OptimizerX86(Optimizer):  # pylint: disable = too-few-public-methods
     _re_branch = re.compile(
         rf"\s*(?P<instruction>{'|'.join(_X86_BRANCHES)})\s+(?P<target>[\w.]+)"
     )
+
+    def _make_jump(self, target: str) -> Instruction:
+        return Instruction(InstructionKind.JUMP, "jmp", f"\tjmp {target}", target)
     # https://www.felixcloutier.com/x86/call
     _re_call = re.compile(r"\s*callq?\s+(?P<target>[\w.]+)")
     # https://www.felixcloutier.com/x86/jmp

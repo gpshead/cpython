@@ -256,6 +256,9 @@ class StencilGroup:
 
     code: Stencil = dataclasses.field(default_factory=Stencil, init=False)
     data: Stencil = dataclasses.field(default_factory=Stencil, init=False)
+    # Byte offset within code.body where cold code begins.
+    # If 0, there is no hot/cold split (all code is hot):
+    cold_offset: int = dataclasses.field(default=0, init=False)
     symbols: dict[int | str, tuple[HoleValue, int]] = dataclasses.field(
         default_factory=dict, init=False
     )
@@ -264,6 +267,14 @@ class StencilGroup:
     )
     _trampolines: set[int] = dataclasses.field(default_factory=set, init=False)
     _got_entries: set[int] = dataclasses.field(default_factory=set, init=False)
+
+    def extract_cold_offset(self) -> None:
+        """Extract the cold code offset from the _JIT_COLD_START symbol."""
+        cold_start = self.symbols.get("_JIT_COLD_START")
+        if cold_start is not None:
+            value, offset = cold_start
+            assert value is HoleValue.CODE
+            self.cold_offset = offset
 
     def convert_labels_to_relocations(self) -> None:
         for name, hole_plus in self.symbols.items():
@@ -420,9 +431,26 @@ class StencilGroup:
     def _get_got_mask(self) -> str:
         return self._get_symbol_mask(self._got_entries)
 
+    def hot_code_size(self) -> int:
+        """Size of the hot code section (or total code if no cold split)."""
+        if self.cold_offset:
+            return self.cold_offset
+        return len(self.code.body)
+
+    def cold_code_size(self) -> int:
+        """Size of the cold code section."""
+        if self.cold_offset:
+            return len(self.code.body) - self.cold_offset
+        return 0
+
     def as_c(self, opname: str) -> str:
         """Dump this hole as a StencilGroup initializer."""
-        return f"{{emit_{opname}, {len(self.code.body)}, {len(self.data.body)}, {self._get_trampoline_mask()}, {self._get_got_mask()}}}"
+        return (
+            f"{{emit_{opname}, {self.hot_code_size()}, "
+            f"{self.cold_code_size()}, "
+            f"{len(self.data.body)}, "
+            f"{self._get_trampoline_mask()}, {self._get_got_mask()}}}"
+        )
 
 
 def symbol_to_value(symbol: str) -> tuple[HoleValue, str | None]:
