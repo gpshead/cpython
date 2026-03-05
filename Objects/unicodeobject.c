@@ -6387,7 +6387,20 @@ _PyUnicode_EncodeUTF16(PyObject *str,
                 goto error;
             }
         }
-        moreunits += pos - newpos;
+        /* Count UTF-16 code units needed for the rewind range.
+           Supplementary characters (>= U+10000) need 2 units each. */
+        if (newpos < pos) {
+            Py_ssize_t rewindunits = pos - newpos;
+            if (kind == PyUnicode_4BYTE_KIND) {
+                const Py_UCS4 *rewind_data = (const Py_UCS4 *)data;
+                for (Py_ssize_t i = newpos; i < pos; i++) {
+                    if (rewind_data[i] >= 0x10000) {
+                        rewindunits++;
+                    }
+                }
+            }
+            moreunits += rewindunits;
+        }
         pos = newpos;
 
         /* two bytes are reserved for each surrogate */
