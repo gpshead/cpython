@@ -136,6 +136,7 @@ def test_marshal():
 
 
 def test_pickle():
+    import io
     import pickle
 
     class PicklePrint:
@@ -154,6 +155,24 @@ def test_pickle():
             pickle.loads(payload_1)
         # pickles with no globals are okay
         pickle.loads(payload_2)
+
+    # Test pickle.loads audit event
+    with TestHook() as hook:
+        pickle.loads(payload_2)
+    actual = [a[0] for e, a in hook.seen if e == "pickle.loads"]
+    assertSequenceEqual(actual, [payload_2])
+
+    # Test pickle.load audit event
+    with TestHook() as hook:
+        pickle.load(io.BytesIO(payload_2))
+    actual = [e for e, a in hook.seen if e == "pickle.load"]
+    assertSequenceEqual(actual, ["pickle.load"])
+
+    # Test pickle.Unpickler audit event
+    with TestHook() as hook:
+        pickle.Unpickler(io.BytesIO(payload_2))
+    actual = [e for e, a in hook.seen if e == "pickle.Unpickler"]
+    assertSequenceEqual(actual, ["pickle.Unpickler"])
 
 
 def test_monkeypatch():
