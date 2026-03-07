@@ -68,6 +68,11 @@ class AuditTest(unittest.TestCase):
 
         self.do_test("test_pickle")
 
+    def test_pickle_load_audit(self):
+        import_helper.import_module("pickle")
+
+        self.do_test("test_pickle_load_audit")
+
     def test_monkeypatch(self):
         self.do_test("test_monkeypatch")
 

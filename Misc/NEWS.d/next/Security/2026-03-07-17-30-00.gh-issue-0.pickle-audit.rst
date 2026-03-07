@@ -1,0 +1,4 @@
+Added audit events ``pickle.load``, ``pickle.loads``, and
+``pickle.Unpickler`` that are raised when unpickling operations are initiated.
+These hooks allow audit hook callbacks to monitor or block deserialization of
+untrusted pickle data.
