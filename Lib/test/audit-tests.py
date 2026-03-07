@@ -137,6 +137,7 @@ def test_marshal():
 
 def test_pickle():
     import pickle
+    import io
 
     class PicklePrint:
         def __reduce_ex__(self, p):
@@ -154,6 +155,34 @@ def test_pickle():
             pickle.loads(payload_1)
         # pickles with no globals are okay
         pickle.loads(payload_2)
+
+    # Test pickle.loads audit event
+    with TestHook() as hook:
+        pickle.loads(payload_2)
+
+    actual = [a[0] for e, a in hook.seen if e == "pickle.loads"]
+    assertSequenceEqual(actual, [payload_2])
+
+    # Test pickle.load audit event
+    with TestHook() as hook:
+        f = io.BytesIO(payload_2)
+        pickle.load(f)
+
+    actual = [e for e, a in hook.seen if e == "pickle.load"]
+    assertSequenceEqual(actual, ["pickle.load"])
+
+    # Test pickle.Unpickler audit event
+    with TestHook() as hook:
+        f = io.BytesIO(payload_2)
+        pickle.Unpickler(f)
+
+    actual = [e for e, a in hook.seen if e == "pickle.Unpickler"]
+    assertSequenceEqual(actual, ["pickle.Unpickler"])
+
+    # Test that pickle.loads can be blocked
+    with TestHook(raise_on_events="pickle.loads") as hook:
+        with assertRaises(RuntimeError):
+            pickle.loads(payload_2)
 
 
 def test_monkeypatch():

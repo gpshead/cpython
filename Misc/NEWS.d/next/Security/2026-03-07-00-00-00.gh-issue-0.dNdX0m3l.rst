@@ -1,0 +1,4 @@
+Added audit hooks for :func:`pickle.load`, :func:`pickle.loads`, and
+:class:`pickle.Unpickler` to allow monitoring and blocking of pickle
+deserialization. The new audit events are ``pickle.load``, ``pickle.loads``,
+and ``pickle.Unpickler``.

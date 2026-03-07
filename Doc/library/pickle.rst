@@ -243,6 +243,8 @@ process more convenient:
    .. versionchanged:: 3.8
       The *buffers* argument was added.
 
+   .. audit-event:: pickle.load file pickle.load
+
 .. function:: loads(data, /, *, fix_imports=True, encoding="ASCII", errors="strict", buffers=None)
 
    Return the reconstituted object hierarchy of the pickled representation
@@ -257,6 +259,8 @@ process more convenient:
 
    .. versionchanged:: 3.8
       The *buffers* argument was added.
+
+   .. audit-event:: pickle.loads data pickle.loads
 
 
 The :mod:`!pickle` module defines three exceptions:
@@ -432,6 +436,8 @@ The :mod:`!pickle` module exports three classes, :class:`Pickler`,
 
    .. versionchanged:: 3.8
       The *buffers* argument was added.
+
+   .. audit-event:: pickle.Unpickler file pickle.Unpickler
 
    .. method:: load()
 
