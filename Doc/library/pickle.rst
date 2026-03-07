@@ -240,6 +240,8 @@ process more convenient:
    Arguments *file*, *fix_imports*, *encoding*, *errors*, *strict* and *buffers*
    have the same meaning as in the :class:`Unpickler` constructor.
 
+   .. audit-event:: pickle.load "" pickle.load
+
    .. versionchanged:: 3.8
       The *buffers* argument was added.
 
@@ -254,6 +256,8 @@ process more convenient:
 
    Arguments *fix_imports*, *encoding*, *errors*, *strict* and *buffers*
    have the same meaning as in the :class:`Unpickler` constructor.
+
+   .. audit-event:: pickle.loads data pickle.loads
 
    .. versionchanged:: 3.8
       The *buffers* argument was added.
@@ -429,6 +433,8 @@ The :mod:`!pickle` module exports three classes, :class:`Pickler`,
    objects that is consumed each time the pickle stream references
    an :ref:`out-of-band <pickle-oob>` buffer view.  Such buffers have been
    given in order to the *buffer_callback* of a Pickler object.
+
+   .. audit-event:: pickle.Unpickler file pickle.Unpickler
 
    .. versionchanged:: 3.8
       The *buffers* argument was added.

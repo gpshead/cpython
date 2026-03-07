@@ -1,0 +1,4 @@
+Added audit events ``pickle.load``, ``pickle.loads``, and
+``pickle.Unpickler`` that are raised when unpickling operations are initiated.
+These complement the existing ``pickle.find_class`` audit event and allow audit
+hooks to detect and prevent untrusted deserialization.

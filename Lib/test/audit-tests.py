@@ -137,6 +137,7 @@ def test_marshal():
 
 def test_pickle():
     import pickle
+    import io
 
     class PicklePrint:
         def __reduce_ex__(self, p):
@@ -154,6 +155,38 @@ def test_pickle():
             pickle.loads(payload_1)
         # pickles with no globals are okay
         pickle.loads(payload_2)
+
+    # Test that pickle.loads audit event is raised with the data argument
+    with TestHook() as hook:
+        pickle.loads(payload_2)
+    loads_events = [(e, a) for e, a in hook.seen if e == "pickle.loads"]
+    assertEqual(len(loads_events), 1)
+    assertEqual(loads_events[0][1][0], payload_2)
+
+    # Test that pickle.load audit event is raised
+    with TestHook() as hook:
+        f = io.BytesIO(payload_2)
+        pickle.load(f)
+    load_events = [e for e, a in hook.seen if e == "pickle.load"]
+    assertEqual(len(load_events), 1)
+
+    # Test that pickle.Unpickler audit event is raised
+    with TestHook() as hook:
+        f = io.BytesIO(payload_2)
+        pickle.Unpickler(f).load()
+    unpickler_events = [(e, a) for e, a in hook.seen if e == "pickle.Unpickler"]
+    assertEqual(len(unpickler_events), 1)
+
+    # Test that pickle.loads can be blocked by an audit hook
+    with TestHook(raise_on_events="pickle.loads") as hook:
+        with assertRaises(RuntimeError):
+            pickle.loads(payload_2)
+
+    # Test that pickle.load can be blocked by an audit hook
+    with TestHook(raise_on_events="pickle.load") as hook:
+        with assertRaises(RuntimeError):
+            f = io.BytesIO(payload_2)
+            pickle.load(f)
 
 
 def test_monkeypatch():
