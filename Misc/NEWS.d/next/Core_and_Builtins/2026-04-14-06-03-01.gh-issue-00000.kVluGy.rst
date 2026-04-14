@@ -1,0 +1,5 @@
+:func:`repr` and :func:`str` of :class:`float` and :class:`complex` values
+are now several times faster.  The shortest-representation conversion now
+uses the Ryū algorithm with a fixed-size lookup table instead of the
+arbitrary-precision arithmetic in David Gay's ``dtoa``.  The output is
+unchanged.

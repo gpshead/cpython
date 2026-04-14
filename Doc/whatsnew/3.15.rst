@@ -1361,6 +1361,12 @@ zlib
 Optimizations
 =============
 
+* :func:`repr` and :func:`str` of :class:`float` and :class:`complex` values
+  are now several times faster, using the Ryū algorithm for shortest
+  float-to-string conversion in place of arbitrary-precision arithmetic.
+  The output is unchanged.
+  (Contributed by Gregory P. Smith in :gh:`00000`.)
+
 * ``mimalloc`` is now used as the default allocator for
   for raw memory allocations such as via :c:func:`PyMem_RawMalloc`
   for better performance on :term:`free-threaded builds <free-threaded build>`.
