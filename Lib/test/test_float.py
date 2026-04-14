@@ -858,6 +858,21 @@ class FormatTestCase(unittest.TestCase):
         self.assertEqual(format(-123.34, '00.10e'), '-1.2334000000e+02')
         self.assertEqual(format(-123.34, '00.10g'), '-123.34')
 
+    @unittest.skipUnless(getattr(sys, 'float_repr_style', '') == 'short',
+                         "applies only when using short float repr style")
+    def test_alternate_form_shortest(self):
+        # '#' with no type code goes through the shortest-repr conversion;
+        # for single-significant-digit values in exponential range it must
+        # still force the decimal point.
+        self.assertEqual(format(1e16, '#'), '1.e+16')
+        self.assertEqual(format(1e300, '#'), '1.e+300')
+        self.assertEqual(format(5e-324, '#'), '5.e-324')
+        self.assertEqual(format(-1e16, '+#'), '-1.e+16')
+        self.assertEqual(format(1e16, ''), '1e+16')
+        self.assertEqual(format(1.5, '#'), '1.5')
+        self.assertEqual(format(100000.0, '#'), '100000.0')
+
+
 class ReprTestCase(unittest.TestCase):
     def test_repr(self):
         with open(os.path.join(os.path.split(__file__)[0],
@@ -912,6 +927,22 @@ class ReprTestCase(unittest.TestCase):
             '2.86438000439698e+28',
             '8.89142905246179e+28',
             '3.08578087079232e+35',
+            # 1/2**24: a value whose shortest repr differs from
+            # "round x to N significant digits" for every N (rounding
+            # to 16 digits gives ...062 which doesn't round-trip;
+            # to 17 gives ...0625 which does, but ...063 is shorter
+            # and also round-trips).
+            '5.960464477539063e-08',
+            # Ties to even: both ...12 and ...13 round-trip to
+            # 1/2**25 and are exactly equidistant from it; the repr
+            # must end in the even digit.
+            '2.9802322387695312e-08',
+            '1.7881393432617188e-07',
+            # Smallest subnormal: '5e-324' (one digit) is shortest;
+            # '4.9e-324' is closer to the true value but longer.
+            '5e-324',
+            # Same one-vs-two-digit choice for the next subnormal up.
+            '1e-323',
             ]
 
         for s in test_strings:
@@ -921,6 +952,51 @@ class ReprTestCase(unittest.TestCase):
             # Since Python 3.2, repr and str are identical
             self.assertEqual(repr(float(s)), str(float(s)))
             self.assertEqual(repr(float(negs)), str(float(negs)))
+
+    @unittest.skipUnless(getattr(sys, 'float_repr_style', '') == 'short',
+                         "applies only when using short float repr style")
+    @support.cpython_only
+    def test_ryu_matches_dtoa(self):
+        # Shortest float repr is computed by the Ryū algorithm; check
+        # that it produces the same digits, decimal-point position and
+        # sign as the reference dtoa implementation for a variety of
+        # values, including random bit patterns.
+        from test.support import import_helper
+        _testinternalcapi = import_helper.import_module('_testinternalcapi')
+        compare = _testinternalcapi.compare_ryu_dtoa
+
+        cases = [
+            0.0, -0.0, 1.0, -1.0, 0.1, 0.5, 1.5, 2.5,
+            5e-324,                    # smallest subnormal
+            2.2250738585072014e-308,   # smallest normal
+            1.7976931348623157e+308,   # largest finite
+            INF, -INF, NAN,
+            # Regression cases from the upstream Ryū test suite.
+            2.98023223876953125e-8,    # LotsOfTrailingZeros
+            -2.109808898695963e16, 4.940656e-318, 1.18575755e-316,
+            2.989102097996e-312, 9.0608011534336e15,
+            4.708356024711512e18, 9.409340012568248e18,
+            float.fromhex('0x1.0F0CF064DD592p+131'),  # LooksLikePow5
+            float.fromhex('0x1.0F0CF064DD592p+132'),
+            float.fromhex('0x1.0F0CF064DD592p+133'),
+            4.294967294, 4.294967295, 4.294967296, 4.294967297,
+        ]
+        # Powers of two include the cases where the shortest repr is
+        # not equal to "round x to N significant digits" for any N
+        # (e.g. 1/2**24, 2**89, 2**-44).
+        cases.extend(2.0 ** e for e in range(-1074, 1024))
+        cases.extend(float(f'1e{e}') for e in range(-323, 309))
+        rng = random.Random(96313)
+        for _ in range(10_000):
+            bits = rng.getrandbits(64)
+            cases.append(struct.unpack('<d', struct.pack('<Q', bits))[0])
+
+        for x in cases:
+            mismatch = compare(x)
+            if mismatch is not None and not math.isnan(x):
+                self.fail(f'ryu/dtoa mismatch for {x.hex()} ({x!r}): '
+                          f'dtoa={mismatch[0]} ryu={mismatch[1]}')
+
 
 @support.requires_IEEE_754
 class RoundTestCase(unittest.TestCase, FloatsAreIdenticalMixin):

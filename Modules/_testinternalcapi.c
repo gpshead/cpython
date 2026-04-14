@@ -19,6 +19,7 @@
 #include "pycore_compile.h"       // _PyCompile_CodeGen()
 #include "pycore_context.h"       // _PyContext_NewHamtForTests()
 #include "pycore_dict.h"          // PyDictValues
+#include "pycore_dtoa.h"          // _Py_dg_dtoa()
 #include "pycore_fileutils.h"     // _Py_normpath()
 #include "pycore_flowgraph.h"     // _PyCompile_OptimizeCfg()
 #include "pycore_frame.h"         // _PyInterpreterFrame
@@ -37,6 +38,7 @@
 #include "pycore_pylifecycle.h"   // _PyInterpreterConfig_InitFromDict()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
 #include "pycore_runtime_structs.h" // _PY_NSMALLPOSINTS
+#include "pycore_ryu.h"           // _Py_ryu_dtoa()
 #include "pycore_unicodeobject.h" // _PyUnicode_TransformDecimalAndSpaceToASCII()
 
 #include "clinic/_testinternalcapi.c.h"
@@ -2852,6 +2854,47 @@ _pyerr_setkeyerror(PyObject *self, PyObject *arg)
 }
 
 
+#if _PY_SHORT_FLOAT_REPR == 1
+static PyObject *
+compare_ryu_dtoa(PyObject *self, PyObject *arg)
+{
+    double d = PyFloat_AsDouble(arg);
+    if (d == -1.0 && PyErr_Occurred()) {
+        return NULL;
+    }
+
+    int g_decpt, g_sign;
+    char *g_end;
+    char *g_digits = _Py_dg_dtoa(d, 0, 0, &g_decpt, &g_sign, &g_end);
+    if (g_digits == NULL) {
+        return PyErr_NoMemory();
+    }
+
+    char r_buf[_Py_RYU_DTOA_BUFSIZE];
+    int r_decpt, r_sign;
+    int r_len = _Py_ryu_dtoa(d, r_buf, &r_decpt, &r_sign);
+
+    int g_len = (int)(g_end - g_digits);
+    int ok = (g_decpt == r_decpt
+              && g_sign == r_sign
+              && g_len == r_len
+              && memcmp(g_digits, r_buf, (size_t)r_len) == 0);
+
+    PyObject *result;
+    if (ok) {
+        result = Py_NewRef(Py_None);
+    }
+    else {
+        result = Py_BuildValue("((sii)(sii))",
+                               g_digits, g_decpt, g_sign,
+                               r_buf, r_decpt, r_sign);
+    }
+    _Py_dg_freedtoa(g_digits);
+    return result;
+}
+#endif
+
+
 static PyMethodDef module_functions[] = {
     {"get_configs", get_configs, METH_NOARGS},
     {"get_eval_frame_stats", get_eval_frame_stats, METH_NOARGS, NULL},
@@ -2974,6 +3017,9 @@ static PyMethodDef module_functions[] = {
     {"test_threadstate_set_stack_protection",
      test_threadstate_set_stack_protection, METH_NOARGS},
     {"_pyerr_setkeyerror", _pyerr_setkeyerror, METH_O},
+#if _PY_SHORT_FLOAT_REPR == 1
+    {"compare_ryu_dtoa", compare_ryu_dtoa, METH_O},
+#endif
     {NULL, NULL} /* sentinel */
 };
 
