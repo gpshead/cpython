@@ -14,6 +14,7 @@
 #include "pycore_global_strings.h" // _Py_ID()
 #include "pycore_pyerrors.h"      // _PyErr_FormatNote
 #include "pycore_runtime.h"       // _PyRuntime
+#include "pycore_ryu.h"           // _Py_double_repr_buffered()
 #include "pycore_tuple.h"         // _PyTuple_FromPair
 #include "pycore_unicodeobject.h" // _PyUnicode_CheckConsistency()
 
@@ -1597,6 +1598,15 @@ encoder_listencode_obj(PyEncoderObject *s, PyUnicodeWriter *writer,
         return _steal_accumulate(writer, encoded);
     }
     else if (PyFloat_Check(obj)) {
+#if _PY_SHORT_FLOAT_REPR == 1
+        double d = PyFloat_AS_DOUBLE(obj);
+        if (isfinite(d)) {
+            char buf[_Py_DOUBLE_REPR_BUFSIZE];
+            Py_ssize_t len = _Py_double_repr_buffered(d, buf, sizeof(buf),
+                                                      Py_DTSF_ADD_DOT_0);
+            return PyUnicodeWriter_WriteASCII(writer, buf, len);
+        }
+#endif
         PyObject *encoded = encoder_encode_float(s, obj);
         if (encoded == NULL)
             return -1;
