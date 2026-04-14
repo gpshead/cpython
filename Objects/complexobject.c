@@ -12,6 +12,7 @@
 #include "pycore_long.h"          // _PyLong_GetZero()
 #include "pycore_object.h"        // _PyObject_Init()
 #include "pycore_pymath.h"        // _Py_ADJUST_ERANGE2()
+#include "pycore_ryu.h"           // _Py_double_repr_buffered()
 
 
 #define _PyComplexObject_CAST(op)   ((PyComplexObject *)(op))
@@ -573,10 +574,38 @@ PyComplex_AsCComplex(PyObject *op)
 static PyObject *
 complex_repr(PyObject *op)
 {
+    PyComplexObject *v = _PyComplexObject_CAST(op);
+#if _PY_SHORT_FLOAT_REPR == 1
+    char buf[2 * _Py_DOUBLE_REPR_BUFSIZE + 4];
+    char *p = buf;
+    Py_ssize_t n;
+
+    if (v->cval.real == 0. && copysign(1.0, v->cval.real) == 1.0) {
+        /* Real part is +0: just output the imaginary part and do not
+           include parens. */
+        n = _Py_double_repr_buffered(v->cval.imag, p, sizeof(buf), 0);
+        p += n;
+        *p++ = 'j';
+    }
+    else {
+        /* Format imaginary part with sign, real part without. Include
+           parens in the result. */
+        *p++ = '(';
+        n = _Py_double_repr_buffered(v->cval.real, p,
+                                     _Py_DOUBLE_REPR_BUFSIZE, 0);
+        p += n;
+        n = _Py_double_repr_buffered(v->cval.imag, p,
+                                     _Py_DOUBLE_REPR_BUFSIZE,
+                                     Py_DTSF_SIGN);
+        p += n;
+        *p++ = 'j';
+        *p++ = ')';
+    }
+    return _PyUnicode_FromASCII(buf, p - buf);
+#else
     int precision = 0;
     char format_code = 'r';
     PyObject *result = NULL;
-    PyComplexObject *v = _PyComplexObject_CAST(op);
 
     /* If these are non-NULL, they'll need to be freed. */
     char *pre = NULL;
@@ -625,6 +654,7 @@ complex_repr(PyObject *op)
     PyMem_Free(pre);
 
     return result;
+#endif
 }
 
 static Py_hash_t
@@ -913,6 +943,13 @@ complex___format___impl(PyComplexObject *self, PyObject *format_spec)
 {
     _PyUnicodeWriter writer;
     int ret;
+
+    if (PyUnicode_GET_LENGTH(format_spec) == 0
+        && Py_IS_TYPE(self, &PyComplex_Type))
+    {
+        return complex_repr((PyObject *)self);
+    }
+
     _PyUnicodeWriter_Init(&writer);
     ret = _PyComplex_FormatAdvancedWriter(
         &writer,

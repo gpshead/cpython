@@ -13,6 +13,7 @@
 #include "pycore_modsupport.h"    // _PyArg_NoKwnames()
 #include "pycore_object.h"        // _PyObject_Init(), _PyDebugAllocatorStats()
 #include "pycore_pymath.h"        // _PY_SHORT_FLOAT_REPR
+#include "pycore_ryu.h"           // _Py_double_repr_buffered()
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
 #include "pycore_stackref.h"      // PyStackRef_AsPyObjectBorrow()
 #include "pycore_structseq.h"     // _PyStructSequence_FiniBuiltin()
@@ -339,6 +340,13 @@ static PyObject *
 float_repr(PyObject *op)
 {
     PyFloatObject *v = _PyFloat_CAST(op);
+#if _PY_SHORT_FLOAT_REPR == 1
+    char buf[_Py_DOUBLE_REPR_BUFSIZE];
+    Py_ssize_t len = _Py_double_repr_buffered(PyFloat_AS_DOUBLE(v),
+                                              buf, sizeof(buf),
+                                              Py_DTSF_ADD_DOT_0);
+    return _PyUnicode_FromASCII(buf, len);
+#else
     PyObject *result;
     char *buf;
 
@@ -351,6 +359,7 @@ float_repr(PyObject *op)
     result = _PyUnicode_FromASCII(buf, strlen(buf));
     PyMem_Free(buf);
     return result;
+#endif
 }
 
 /* Comparison is pretty much a nightmare.  When comparing float to float,
@@ -1728,6 +1737,12 @@ float___format___impl(PyObject *self, PyObject *format_spec)
 {
     _PyUnicodeWriter writer;
     int ret;
+
+    if (PyUnicode_GET_LENGTH(format_spec) == 0
+        && Py_IS_TYPE(self, &PyFloat_Type))
+    {
+        return float_repr(self);
+    }
 
     _PyUnicodeWriter_Init(&writer);
     ret = _PyFloat_FormatAdvancedWriter(

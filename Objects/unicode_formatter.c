@@ -5,6 +5,7 @@
 #include "Python.h"
 #include "pycore_fileutils.h"     // _Py_GetLocaleconvNumeric()
 #include "pycore_long.h"          // _PyLong_FormatWriter()
+#include "pycore_ryu.h"           // _Py_double_repr_buffered()
 #include "pycore_unicodeobject.h" // PyUnicode_MAX_CHAR_VALUE()
 #include <locale.h>
 
@@ -1375,6 +1376,7 @@ format_float_internal(PyObject *value,
                       _PyUnicodeWriter *writer)
 {
     char *buf = NULL;       /* buffer returned from PyOS_double_to_string */
+    int buf_allocated = 1;
     Py_ssize_t n_digits;
     Py_ssize_t n_remainder;
     Py_ssize_t n_frac;
@@ -1390,7 +1392,6 @@ format_float_internal(PyObject *value,
     int result = -1;
     Py_UCS4 maxchar = 127;
     Py_UCS4 sign_char = '\0';
-    int float_type; /* Used to see if we have a nan, inf, or regular float. */
     PyObject *unicode_tmp = NULL;
 
     /* Locale settings, either from the actual locale or
@@ -1440,11 +1441,23 @@ format_float_internal(PyObject *value,
     /* Cast "type", because if we're in unicode we need to pass an
        8-bit char. This is safe, because we've restricted what "type"
        can be. */
-    buf = PyOS_double_to_string(val, (char)type, precision, flags,
-                                &float_type);
-    if (buf == NULL)
-        goto done;
-    n_digits = strlen(buf);
+#if _PY_SHORT_FLOAT_REPR == 1
+    char repr_buf[_Py_DOUBLE_REPR_BUFSIZE];
+    if (type == 'r') {
+        n_digits = _Py_double_repr_buffered(val, repr_buf, sizeof(repr_buf),
+                                            flags);
+        buf = repr_buf;
+        buf_allocated = 0;
+    }
+    else
+#endif
+    {
+        buf = PyOS_double_to_string(val, (char)type, precision, flags,
+                                    NULL);
+        if (buf == NULL)
+            goto done;
+        n_digits = strlen(buf);
+    }
 
     if (add_pct) {
         /* We know that buf has a trailing zero (since we just called
@@ -1462,14 +1475,18 @@ format_float_internal(PyObject *value,
     {
         /* Fast path */
         result = _PyUnicodeWriter_WriteASCIIString(writer, buf, n_digits);
-        PyMem_Free(buf);
+        if (buf_allocated) {
+            PyMem_Free(buf);
+        }
         return result;
     }
 
     /* Since there is no unicode version of PyOS_double_to_string,
        just use the 8 bit version and then convert to unicode. */
     unicode_tmp = _PyUnicode_FromASCII(buf, n_digits);
-    PyMem_Free(buf);
+    if (buf_allocated) {
+        PyMem_Free(buf);
+    }
     if (unicode_tmp == NULL)
         goto done;
 
@@ -1556,8 +1573,6 @@ format_complex_internal(PyObject *value,
     void *rdata;
     Py_UCS4 re_sign_char = '\0';
     Py_UCS4 im_sign_char = '\0';
-    int re_float_type; /* Used to see if we have a nan, inf, or regular float. */
-    int im_float_type;
     int add_parens = 0;
     int skip_re = 0;
     Py_ssize_t lpad;
@@ -1628,11 +1643,11 @@ format_complex_internal(PyObject *value,
        8-bit char. This is safe, because we've restricted what "type"
        can be. */
     re_buf = PyOS_double_to_string(re, (char)type, precision, flags,
-                                   &re_float_type);
+                                   NULL);
     if (re_buf == NULL)
         goto done;
     im_buf = PyOS_double_to_string(im, (char)type, precision, flags,
-                                   &im_float_type);
+                                   NULL);
     if (im_buf == NULL)
         goto done;
 
