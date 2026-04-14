@@ -3,6 +3,7 @@
 #include <Python.h>
 #include "pycore_dtoa.h"          // _Py_dg_strtod()
 #include "pycore_pymath.h"        // _PY_SHORT_FLOAT_REPR
+#include "pycore_ryu.h"           // _Py_ryu_dtoa()
 
 #include <locale.h>               // localeconv()
 
@@ -942,19 +943,19 @@ static const char * const uc_float_strings[] = {
 
    Arguments:
      d is the double to be converted
-     format_code is one of 'e', 'f', 'g', 'r'.  'e', 'f' and 'g'
-       correspond to '%e', '%f' and '%g';  'r' corresponds to repr.
-     mode is one of '0', '2' or '3', and is completely determined by
-       format_code: 'e' and 'g' use mode 2; 'f' mode 3, 'r' mode 0.
+     format_code is one of 'e', 'f', 'g'.  'e', 'f' and 'g'
+       correspond to '%e', '%f' and '%g'.  ('r' is handled separately
+       by double_repr_buffered() below.)
+     mode is one of '2' or '3', and is completely determined by
+       format_code: 'e' and 'g' use mode 2; 'f' mode 3.
      precision is the desired precision
      always_add_sign is nonzero if a '+' sign should be included for positive
        numbers
      add_dot_0_if_integer is nonzero if integers in non-exponential form
-       should have ".0" added.  Only applies to format codes 'r' and 'g'.
+       should have ".0" added.  Only applies to format code 'g'.
      use_alt_formatting is nonzero if alternative formatting should be
-       used.  Only applies to format codes 'e', 'f' and 'g'.  For code 'g',
-       at most one of use_alt_formatting and add_dot_0_if_integer should
-       be nonzero.
+       used.  For code 'g', at most one of use_alt_formatting and
+       add_dot_0_if_integer should be nonzero.
      type, if non-NULL, will be set to one of these constants to identify
        the type of the 'd' argument:
      Py_DTST_FINITE
@@ -976,7 +977,7 @@ format_float_short(double d, char format_code,
     char *p = NULL;
     Py_ssize_t bufsize = 0;
     char *digits, *digits_end;
-    int decpt_as_int, sign, exp_len, exp = 0, use_exp = 0;
+    int decpt_as_int, sign, exp = 0, use_exp = 0;
     Py_ssize_t decpt, digits_len, vdigits_start, vdigits_end;
     _Py_SET_53BIT_PRECISION_HEADER;
 
@@ -1090,15 +1091,6 @@ format_float_short(double d, char format_code,
         if (use_alt_formatting)
             vdigits_end = precision;
         break;
-    case 'r':
-        /* convert to exponential format at 1e16.  We used to convert
-           at 1e17, but that gives odd-looking results for some values
-           when a 16-digit 'shortest' repr is padded with bogus zeros.
-           For example, repr(2e16+8) would give 20000000000000010.0;
-           the true value is 20000000000000008.0. */
-        if (decpt <= -4 || decpt > 16)
-            use_exp = 1;
-        break;
     default:
         PyErr_BadInternalCall();
         goto exit;
@@ -1201,8 +1193,24 @@ format_float_short(double d, char format_code,
     /* Now that we've done zero padding, add an exponent if needed. */
     if (use_exp) {
         *p++ = float_strings[OFS_E][0];
-        exp_len = sprintf(p, "%+.02d", exp);
-        p += exp_len;
+        /* Emit a sign followed by at least two exponent digits.  For
+           IEEE 754 doubles |exp| < 1000, so at most three digits. */
+        unsigned int uexp;
+        if (exp < 0) {
+            *p++ = '-';
+            uexp = (unsigned int)(-exp);
+        }
+        else {
+            *p++ = '+';
+            uexp = (unsigned int)exp;
+        }
+        assert(uexp < 1000);  /* matches the bufsize computation above */
+        if (uexp >= 100) {
+            *p++ = (char)('0' + uexp / 100);
+            uexp %= 100;
+        }
+        *p++ = (char)('0' + uexp / 10);
+        *p++ = (char)('0' + uexp % 10);
     }
   exit:
     if (buf) {
@@ -1215,6 +1223,140 @@ format_float_short(double d, char format_code,
         _Py_dg_freedtoa(digits);
 
     return buf;
+}
+
+
+/* Write the Python repr of a finite or non-finite double into the
+   caller-provided buffer.  This is equivalent to PyOS_double_to_string
+   with format code 'r', but never allocates.
+
+   The 'r' formatting rules are simple enough to implement directly here
+   rather than going through format_float_short. */
+static Py_ssize_t
+double_repr_buffered(double val, char *buf, Py_ssize_t bufsize,
+                     int flags, int *type)
+{
+    assert(bufsize >= _Py_DOUBLE_REPR_BUFSIZE);
+    (void)bufsize;
+
+    char digits[_Py_RYU_DTOA_BUFSIZE];
+    int decpt, sign;
+    int digits_len = _Py_ryu_dtoa(val, digits, &decpt, &sign);
+
+    char *p = buf;
+
+    if (!Py_ISDIGIT(digits[0])) {
+        int is_nan = (digits[0] == 'N');
+        if (type) {
+            *type = is_nan ? Py_DTST_NAN : Py_DTST_INFINITE;
+        }
+        if (is_nan) {
+            sign = 0;
+        }
+        if (sign) {
+            *p++ = '-';
+        }
+        else if (flags & Py_DTSF_SIGN) {
+            *p++ = '+';
+        }
+        memcpy(p, is_nan ? "nan" : "inf", 3);
+        p += 3;
+        *p = '\0';
+        return p - buf;
+    }
+
+    if (type) {
+        *type = Py_DTST_FINITE;
+    }
+    if ((flags & Py_DTSF_NO_NEG_0) && sign
+        && digits_len == 1 && digits[0] == '0')
+    {
+        sign = 0;
+    }
+    if (sign) {
+        *p++ = '-';
+    }
+    else if (flags & Py_DTSF_SIGN) {
+        *p++ = '+';
+    }
+
+    /* Convert to exponential format at 1e16.  We used to convert
+       at 1e17, but that gives odd-looking results for some values
+       when a 16-digit 'shortest' repr is padded with bogus zeros.
+       For example, repr(2e16+8) would give 20000000000000010.0;
+       the true value is 20000000000000008.0. */
+    if (decpt <= -4 || decpt > 16) {
+        /* Exponential form: D.DDDe+NN */
+        *p++ = digits[0];
+        if (digits_len > 1) {
+            *p++ = '.';
+            memcpy(p, digits + 1, (size_t)(digits_len - 1));
+            p += digits_len - 1;
+        }
+        else if (flags & Py_DTSF_ALT) {
+            *p++ = '.';
+        }
+        *p++ = 'e';
+        int exp = decpt - 1;
+        unsigned int uexp;
+        if (exp < 0) {
+            *p++ = '-';
+            uexp = (unsigned int)(-exp);
+        }
+        else {
+            *p++ = '+';
+            uexp = (unsigned int)exp;
+        }
+        assert(uexp < 1000);
+        if (uexp >= 100) {
+            *p++ = (char)('0' + uexp / 100);
+            uexp %= 100;
+        }
+        *p++ = (char)('0' + uexp / 10);
+        *p++ = (char)('0' + uexp % 10);
+    }
+    else if (decpt <= 0) {
+        /* 0.[000]DDD */
+        *p++ = '0';
+        *p++ = '.';
+        memset(p, '0', (size_t)(-decpt));
+        p += -decpt;
+        memcpy(p, digits, (size_t)digits_len);
+        p += digits_len;
+    }
+    else if (decpt < digits_len) {
+        /* DD.DDD */
+        memcpy(p, digits, (size_t)decpt);
+        p += decpt;
+        *p++ = '.';
+        memcpy(p, digits + decpt, (size_t)(digits_len - decpt));
+        p += digits_len - decpt;
+    }
+    else {
+        /* DDD[000][.0] */
+        memcpy(p, digits, (size_t)digits_len);
+        p += digits_len;
+        memset(p, '0', (size_t)(decpt - digits_len));
+        p += decpt - digits_len;
+        if (flags & Py_DTSF_ADD_DOT_0) {
+            *p++ = '.';
+            *p++ = '0';
+        }
+        else if (flags & Py_DTSF_ALT) {
+            *p++ = '.';
+        }
+    }
+
+    *p = '\0';
+    assert(p - buf < _Py_DOUBLE_REPR_BUFSIZE);
+    return p - buf;
+}
+
+
+Py_ssize_t
+_Py_double_repr_buffered(double val, char *buf, Py_ssize_t bufsize, int flags)
+{
+    return double_repr_buffered(val, buf, bufsize, flags, NULL);
 }
 
 
@@ -1262,14 +1404,20 @@ char * PyOS_double_to_string(double val,
         break;
 
     /* repr format */
-    case 'r':
-        mode = 0;
+    case 'r': {
         /* Supplied precision is unused, must be 0. */
         if (precision != 0) {
             PyErr_BadInternalCall();
             return NULL;
         }
-        break;
+        char *buf = (char *)PyMem_Malloc(_Py_DOUBLE_REPR_BUFSIZE);
+        if (buf == NULL) {
+            PyErr_NoMemory();
+            return NULL;
+        }
+        double_repr_buffered(val, buf, _Py_DOUBLE_REPR_BUFSIZE, flags, type);
+        return buf;
+    }
 
     default:
         PyErr_BadInternalCall();
