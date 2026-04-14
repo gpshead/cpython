@@ -828,6 +828,9 @@
     <ClInclude Include="..\Include\internal\pycore_runtime_structs.h">
       <Filter>Include\internal</Filter>
     </ClInclude>
+    <ClInclude Include="..\Include\internal\pycore_ryu.h">
+      <Filter>Include\internal</Filter>
+    </ClInclude>
     <ClInclude Include="..\Include\internal\pycore_semaphore.h">
       <Filter>Include\internal</Filter>
     </ClInclude>
@@ -1554,6 +1557,9 @@
       <Filter>Python</Filter>
     </ClCompile>
     <ClCompile Include="..\Python\dtoa.c">
+      <Filter>Python</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Python\ryu.c">
       <Filter>Python</Filter>
     </ClCompile>
     <ClCompile Include="..\Python\Python-ast.c">

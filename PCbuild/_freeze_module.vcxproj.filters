@@ -412,6 +412,9 @@
     <ClCompile Include="..\Python\remote_debugging.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\Python\ryu.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\Python\specialize.c">
       <Filter>Source Files</Filter>
     </ClCompile>

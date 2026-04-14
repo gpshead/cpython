@@ -329,6 +329,7 @@ MAX_SIZES = {
     _abs('Python/pylifecycle.c'): (750_000, 5000),
     _abs('Python/pystate.c'): (750_000, 5000),
     _abs('Python/initconfig.c'): (50_000, 500),
+    _abs('Python/ryu.c'): (20_000, 200),
 
     # Generated files:
     _abs('Include/internal/pycore_opcode.h'): (10_000, 1000),

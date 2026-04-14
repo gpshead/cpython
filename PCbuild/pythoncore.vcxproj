@@ -308,6 +308,7 @@
     <ClInclude Include="..\Include\internal\pycore_runtime_init.h" />
     <ClInclude Include="..\Include\internal\pycore_runtime_init_generated.h" />
     <ClInclude Include="..\Include\internal\pycore_runtime_structs.h" />
+    <ClInclude Include="..\Include\internal\pycore_ryu.h" />
     <ClInclude Include="..\Include\internal\pycore_semaphore.h" />
     <ClInclude Include="..\Include\internal\pycore_setobject.h" />
     <ClInclude Include="..\Include\internal\pycore_signal.h" />
@@ -671,6 +672,7 @@
     <ClCompile Include="..\Python\remote_debugging.c" />
     <ClCompile Include="..\Python\qsbr.c" />
     <ClCompile Include="..\Python\dtoa.c" />
+    <ClCompile Include="..\Python\ryu.c" />
     <ClCompile Include="..\Python\Python-ast.c" />
     <ClCompile Include="..\Python\Python-tokenize.c" />
     <ClCompile Include="..\Python\pythonrun.c" />
