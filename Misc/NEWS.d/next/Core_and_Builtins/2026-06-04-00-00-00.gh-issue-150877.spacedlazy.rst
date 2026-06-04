@@ -1,0 +1,4 @@
+The parser now emits a :exc:`SyntaxWarning` for relative imports such as
+``from . lazy import x`` (with whitespace between the dots and a module
+named ``lazy``), which are parsed exactly like ``from .lazy import x`` but
+are most likely a transposition of ``lazy from . import x`` (:pep:`810`).

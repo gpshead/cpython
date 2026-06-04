@@ -10,6 +10,7 @@ import types
 import unittest
 import tempfile
 import os
+import warnings
 
 from test import support
 from test.support.script_helper import assert_python_ok
@@ -1491,6 +1492,82 @@ class AdditionalSyntaxRestrictionTests(unittest.TestCase):
         # not inside functions, class bodies, try blocks, or import *"
         with self.assertRaises(SyntaxError):
             import test.test_lazy_import.data.badsyntax.lazy_class_body
+
+
+class SpacedRelativeLazyImportWarningTests(unittest.TestCase):
+    """Tests for the SyntaxWarning on `from . lazy import x`.
+
+    `from . lazy import x` is parsed exactly like `from .lazy import x`
+    (whitespace between the dots and the module name is insignificant),
+    but it is most likely a transposition of `lazy from . import x`,
+    so the parser emits a SyntaxWarning for it.
+    """
+
+    def assert_warns(self, source, suggestion):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            compile(source, "<test>", "exec")
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, SyntaxWarning)
+        self.assertIn(suggestion, str(caught[0].message))
+
+    def assert_no_warning(self, source):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            compile(source, "<test>", "exec")
+        self.assertEqual(caught, [])
+
+    def test_spaced_relative_lazy_import_warns(self):
+        self.assert_warns("from . lazy import x",
+                          "did you mean 'lazy from . import'?")
+
+    def test_multiple_dots(self):
+        self.assert_warns("from .. lazy import x",
+                          "did you mean 'lazy from .. import'?")
+        # '...' is a single ELLIPSIS token
+        self.assert_warns("from ... lazy import x",
+                          "did you mean 'lazy from ... import'?")
+        self.assert_warns("from .... lazy import x",
+                          "did you mean 'lazy from .... import'?")
+
+    def test_lazy_is_first_component_of_dotted_name(self):
+        self.assert_warns("from . lazy.sub import x",
+                          "did you mean 'lazy from .sub import'?")
+
+    def test_line_continuation(self):
+        self.assert_warns("from . \\\n    lazy import x",
+                          "did you mean 'lazy from . import'?")
+
+    def test_no_warning_without_whitespace(self):
+        self.assert_no_warning("from .lazy import x")
+        self.assert_no_warning("from ..lazy import x")
+        self.assert_no_warning("from .lazy.sub import x")
+
+    def test_no_warning_for_other_names(self):
+        self.assert_no_warning("from . lazier import x")
+        self.assert_no_warning("from . lazy_module import x")
+        self.assert_no_warning("from . sub.lazy import x")
+
+    def test_no_warning_for_absolute_import(self):
+        self.assert_no_warning("from lazy import x")
+        self.assert_no_warning("from lazy.sub import x")
+
+    def test_no_warning_when_already_lazy(self):
+        self.assert_no_warning("lazy from . lazy import x")
+
+    def test_no_warning_for_import_of_name_lazy(self):
+        self.assert_no_warning("from . import lazy")
+
+    def test_warning_as_error_is_syntax_error(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", SyntaxWarning)
+            with self.assertRaises(SyntaxError) as cm:
+                compile("from . lazy import x", "<test>", "exec")
+        self.assertIn("did you mean 'lazy from . import'?", cm.exception.msg)
+        # The error points at the module name 'lazy'
+        self.assertEqual(cm.exception.lineno, 1)
+        self.assertEqual(cm.exception.offset, 8)
+        self.assertEqual(cm.exception.end_offset, 12)
 
 
 @support.requires_subprocess()
