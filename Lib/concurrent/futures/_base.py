@@ -595,6 +595,37 @@ class Future(object):
 class Executor(object):
     """This is an abstract base class for concrete asynchronous executors."""
 
+    # The action taken by __exit__() when the ``with`` block raised an
+    # exception.  Overridden by the *on_error* constructor argument.  See
+    # _on_error_actions() for the set of values accepted by this executor.
+    _on_error = "wait"
+
+    @classmethod
+    def _on_error_actions(cls):
+        """Return the set of *on_error* actions this executor supports.
+
+        Executors that can forcibly stop their workers (e.g.
+        :class:`ProcessPoolExecutor`) extend this set.
+        """
+        return frozenset({"wait", "cancel"})
+
+    @classmethod
+    def _check_on_error(cls, on_error):
+        """Validate an *on_error* value, returning it unchanged.
+
+        A callable is accepted as-is (its return value is validated later,
+        when it is invoked by __exit__()).  A string must name an action
+        supported by this executor.
+        """
+        if not callable(on_error):
+            actions = cls._on_error_actions()
+            if on_error not in actions:
+                raise ValueError(
+                    f"{cls.__name__} on_error must be a callable or one of "
+                    f"{', '.join(map(repr, sorted(actions)))}; "
+                    f"got {on_error!r}")
+        return on_error
+
     def submit(self, fn, /, *args, **kwargs):
         """Submits a callable to be executed with the given arguments.
 
@@ -697,8 +728,28 @@ class Executor(object):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.shutdown(wait=True)
+        if exc_val is None:
+            self.shutdown(wait=True)
+        else:
+            action = self._on_error
+            if callable(action):
+                action = action(self, exc_val)
+            self._shutdown_on_error(self._check_on_error(action))
         return False
+
+    def _shutdown_on_error(self, action):
+        # Carry out a resolved *on_error* action.  Subclasses that support
+        # additional actions (e.g. "kill"/"terminate") override this and defer
+        # to super() for the actions handled here.
+        if action == "wait":
+            self.shutdown(wait=True)
+        elif action == "cancel":
+            self.shutdown(wait=True, cancel_futures=True)
+        else:
+            # Should be unreachable: _check_on_error() validated the action.
+            raise ValueError(
+                f"{type(self).__name__} cannot handle on_error "
+                f"action {action!r}")
 
 
 class BrokenExecutor(RuntimeError):

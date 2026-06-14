@@ -118,6 +118,14 @@ Executor Objects
              e.submit(shutil.copy, 'src3.txt', 'dest3.txt')
              e.submit(shutil.copy, 'src4.txt', 'dest4.txt')
 
+      If the :keyword:`with` block raises an exception, the executor still
+      waits, by default, for all pending futures to finish before re-raising
+      it.  This can delay reporting the exception for a long time when many
+      futures are still queued.  The *on_error* argument of the executor
+      constructors lets you instead cancel (or, for
+      :class:`ProcessPoolExecutor`, forcibly stop) the outstanding work in
+      that situation.  See the individual constructors for details.
+
       .. versionchanged:: 3.9
          Added *cancel_futures*.
 
@@ -161,7 +169,7 @@ And::
    # the single worker thread is already waiting for wait_on_future().
 
 
-.. class:: ThreadPoolExecutor(max_workers=None, thread_name_prefix='', initializer=None, initargs=())
+.. class:: ThreadPoolExecutor(max_workers=None, thread_name_prefix='', initializer=None, initargs=(), *, on_error='wait')
 
    An :class:`Executor` subclass that uses a pool of at most *max_workers*
    threads to execute calls asynchronously.
@@ -178,6 +186,22 @@ And::
    initializer.  Should *initializer* raise an exception, all currently
    pending jobs will raise a :exc:`~concurrent.futures.thread.BrokenThreadPool`,
    as well as any attempt to submit more jobs to the pool.
+
+   *on_error* controls what happens to outstanding futures when the executor
+   is used as a :term:`context manager` and the :keyword:`with` block raises
+   an exception.  It is one of the following strings:
+
+   * ``"wait"`` (the default): wait for all pending futures to finish, as if
+     no exception had been raised.  This matches the behavior of executors
+     created without *on_error*.
+   * ``"cancel"``: cancel futures that have not started running yet, letting
+     the running ones finish, then re-raise.
+
+   *on_error* may instead be a callable taking the executor and the raised
+   exception and returning one of those strings, allowing the action to be
+   chosen based on the exception (for example only cancelling on
+   :exc:`KeyboardInterrupt`).  *on_error* has no effect when the
+   :keyword:`with` block exits normally.
 
    .. versionchanged:: 3.5
       If *max_workers* is ``None`` or
@@ -207,6 +231,9 @@ And::
    .. versionchanged:: 3.13
       Default value of *max_workers* is changed to
       ``min(32, (os.process_cpu_count() or 1) + 4)``.
+
+   .. versionchanged:: 3.16
+      Added the *on_error* parameter.
 
 
 .. _threadpoolexecutor-example:
@@ -296,7 +323,7 @@ efficient alternative is to serialize with :mod:`pickle` and then send
 the bytes over a shared :mod:`socket <socket>` or
 :func:`pipe <os.pipe>`.
 
-.. class:: InterpreterPoolExecutor(max_workers=None, thread_name_prefix='', initializer=None, initargs=())
+.. class:: InterpreterPoolExecutor(max_workers=None, thread_name_prefix='', initializer=None, initargs=(), *, on_error='wait')
 
    A :class:`ThreadPoolExecutor` subclass that executes calls asynchronously
    using a pool of at most *max_workers* threads.  Each thread runs
@@ -317,7 +344,12 @@ the bytes over a shared :mod:`socket <socket>` or
       The executor may replace uncaught exceptions from *initializer*
       with :class:`~concurrent.interpreters.ExecutionFailed`.
 
+   The *on_error* argument behaves as for :class:`ThreadPoolExecutor`.
+
    Other caveats from parent :class:`ThreadPoolExecutor` apply here.
+
+   .. versionchanged:: 3.16
+      Added the *on_error* parameter.
 
 :meth:`~Executor.submit` and :meth:`~Executor.map` work like normal,
 except the worker serializes the callable and arguments using
@@ -356,7 +388,7 @@ per :class:`multiprocessing.Process` apply when using :meth:`~Executor.submit`
 and :meth:`~Executor.map` on a :class:`ProcessPoolExecutor`. A function defined
 in a REPL or a lambda should not be expected to work.
 
-.. class:: ProcessPoolExecutor(max_workers=None, mp_context=None, initializer=None, initargs=(), max_tasks_per_child=None)
+.. class:: ProcessPoolExecutor(max_workers=None, mp_context=None, initializer=None, initargs=(), max_tasks_per_child=None, *, on_error='wait')
 
    An :class:`Executor` subclass that executes calls asynchronously using a pool
    of at most *max_workers* processes.  If *max_workers* is ``None`` or not
@@ -391,6 +423,20 @@ in a REPL or a lambda should not be expected to work.
       can result in the :class:`ProcessPoolExecutor` hanging in some
       circumstances. Follow its eventual resolution in :gh:`115634`.
 
+   *on_error* controls what happens to outstanding futures when the executor
+   is used as a :term:`context manager` and the :keyword:`with` block raises
+   an exception.  In addition to the ``"wait"`` and ``"cancel"`` actions
+   described for :class:`ThreadPoolExecutor`, it accepts:
+
+   * ``"terminate"``: cancel pending futures and terminate the worker
+     processes (as if by :meth:`terminate_workers`).
+   * ``"kill"``: cancel pending futures and kill the worker processes (as if
+     by :meth:`kill_workers`).
+
+   As with :class:`ThreadPoolExecutor`, *on_error* may also be a callable
+   returning one of the action strings.  After ``"terminate"`` or ``"kill"``
+   the pool is left in a broken state and should not be reused.
+
    .. versionchanged:: 3.3
       When one of the worker processes terminates abruptly, a
       :exc:`~concurrent.futures.process.BrokenProcessPool` error is now raised.
@@ -407,6 +453,9 @@ in a REPL or a lambda should not be expected to work.
    .. versionchanged:: 3.11
       The *max_tasks_per_child* argument was added to allow users to
       control the lifetime of workers in the pool.
+
+   .. versionchanged:: 3.16
+      Added the *on_error* parameter.
 
    .. versionchanged:: 3.12
       On POSIX systems, if your application has multiple threads and the

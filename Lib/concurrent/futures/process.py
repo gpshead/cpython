@@ -653,7 +653,8 @@ _SHUTDOWN_CALLBACK_OPERATION = {
 
 class ProcessPoolExecutor(_base.Executor):
     def __init__(self, max_workers=None, mp_context=None,
-                 initializer=None, initargs=(), *, max_tasks_per_child=None):
+                 initializer=None, initargs=(), *, max_tasks_per_child=None,
+                 on_error='wait'):
         """Initializes a new ProcessPoolExecutor instance.
 
         Args:
@@ -673,8 +674,19 @@ class ProcessPoolExecutor(_base.Executor):
                 worker process will live as long as the executor.  Requires
                 a non-'fork' mp_context start method.  When given, we
                 default to using 'spawn' if no mp_context is supplied.
+            on_error: What to do with pending work when the executor is used
+                as a context manager and the ``with`` block raises an
+                exception.  One of "wait" (the default: wait for all pending
+                work to finish, as if no exception was raised), "cancel"
+                (cancel pending work that has not started yet), "terminate"
+                (also terminate the worker processes, see terminate_workers())
+                or "kill" (also kill the worker processes, see kill_workers()).
+                May also be a callable taking the executor and the exception
+                and returning one of those strings.
         """
         _check_system_limits()
+
+        self._on_error = self._check_on_error(on_error)
 
         if max_workers is None:
             self._max_workers = os.process_cpu_count() or 1
@@ -893,6 +905,18 @@ class ProcessPoolExecutor(_base.Executor):
         self._executor_manager_thread_wakeup = None
 
     shutdown.__doc__ = _base.Executor.shutdown.__doc__
+
+    @classmethod
+    def _on_error_actions(cls):
+        return super()._on_error_actions() | {_TERMINATE, _KILL}
+
+    def _shutdown_on_error(self, action):
+        if action == _TERMINATE:
+            self.terminate_workers()
+        elif action == _KILL:
+            self.kill_workers()
+        else:
+            super()._shutdown_on_error(action)
 
     def _force_shutdown(self, operation):
         """Attempts to terminate or kill the executor's workers based off the

@@ -159,7 +159,8 @@ class ThreadPoolExecutor(_base.Executor):
         return WorkerContext.prepare(initializer, initargs)
 
     def __init__(self, max_workers=None, thread_name_prefix='',
-                 initializer=None, initargs=(), **ctxkwargs):
+                 initializer=None, initargs=(), *, on_error='wait',
+                 **ctxkwargs):
         """Initializes a new ThreadPoolExecutor instance.
 
         Args:
@@ -168,8 +169,16 @@ class ThreadPoolExecutor(_base.Executor):
             thread_name_prefix: An optional name prefix to give our threads.
             initializer: A callable used to initialize worker threads.
             initargs: A tuple of arguments to pass to the initializer.
+            on_error: What to do with pending work when the executor is used
+                as a context manager and the ``with`` block raises an
+                exception.  Either "wait" (the default: wait for all pending
+                work to finish, as if no exception was raised) or "cancel"
+                (cancel pending work that has not started yet).  May also be a
+                callable taking the executor and the exception and returning
+                one of those strings.
             ctxkwargs: Additional arguments to cls.prepare_context().
         """
+        self._on_error = self._check_on_error(on_error)
         if max_workers is None:
             # ThreadPoolExecutor is often used to:
             # * CPU bound task which releases GIL

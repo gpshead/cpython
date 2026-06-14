@@ -106,7 +106,7 @@ class InterpreterPoolExecutor(_thread.ThreadPoolExecutor):
         return WorkerContext.prepare(initializer, initargs)
 
     def __init__(self, max_workers=None, thread_name_prefix='',
-                 initializer=None, initargs=()):
+                 initializer=None, initargs=(), *, on_error='wait'):
         """Initializes a new InterpreterPoolExecutor instance.
 
         Args:
@@ -116,8 +116,11 @@ class InterpreterPoolExecutor(_thread.ThreadPoolExecutor):
             initializer: A callable or script used to initialize
                 each worker interpreter.
             initargs: A tuple of arguments to pass to the initializer.
+            on_error: What to do with pending work when the executor is used
+                as a context manager and the ``with`` block raises an
+                exception.  See ThreadPoolExecutor for details.
         """
         thread_name_prefix = (thread_name_prefix or
                               (f"InterpreterPoolExecutor-{self._counter()}"))
         super().__init__(max_workers, thread_name_prefix,
-                         initializer, initargs)
+                         initializer, initargs, on_error=on_error)

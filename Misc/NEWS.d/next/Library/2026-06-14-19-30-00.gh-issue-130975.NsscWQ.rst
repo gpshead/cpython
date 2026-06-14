@@ -1,0 +1,8 @@
+Add an *on_error* keyword-only argument to the
+:class:`concurrent.futures.Executor` subclass constructors.  It controls what
+happens to outstanding futures when the executor is used as a context manager
+and the :keyword:`with` block raises an exception: ``"wait"`` (the default,
+today's behavior), ``"cancel"`` and, for
+:class:`~concurrent.futures.ProcessPoolExecutor`, ``"terminate"`` and
+``"kill"``.  A callable returning one of those actions may be supplied to
+decide based on the exception.  Patch by Gregory P. Smith.
