@@ -1096,6 +1096,7 @@ class _SelectorSocketTransport(_SelectorTransport):
             self._add_writer(self._sock_fd, self._write_ready)
 
         # Add it to the buffer.
+        data = transports._immutable_view(data)
         self._buffer.append(data)
         self._buffer_size += len(data)
         self._maybe_pause_protocol()
@@ -1203,17 +1204,26 @@ class _SelectorSocketTransport(_SelectorTransport):
             self._conn_lost += 1
             return
 
+        # Don't copy what can be sent now, only what stays in the buffer.
+        send_now = not self._buffer
         for data in list_of_data:
             # gh-155888: an empty chunk can never be drained, so never buffer it
             if not data:
                 continue
-            self._buffer.append(memoryview(data))
+            if send_now:
+                data = memoryview(data)
+            else:
+                data = transports._immutable_view(data)
+            self._buffer.append(data)
             self._buffer_size += len(data)
         if not self._buffer:
             return
         self._write_ready()
         # If the entire buffer couldn't be written, register a write handler
         if self._buffer:
+            if send_now:
+                self._buffer = collections.deque(
+                    map(transports._immutable_view, self._buffer))
             self._add_writer(self._sock_fd, self._write_ready)
             self._maybe_pause_protocol()
 

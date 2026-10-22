@@ -250,6 +250,18 @@ class SubprocessTransport(BaseTransport):
         raise NotImplementedError
 
 
+def _immutable_view(data):
+    """Return a memoryview of data which is safe to keep in a write buffer.
+
+    The caller of write() may reuse a bytearray, or the object behind a
+    memoryview, as soon as write() returns: copy everything but bytes.
+    """
+    data = memoryview(data)
+    if not isinstance(data.obj, bytes):
+        data = memoryview(bytes(data))
+    return data
+
+
 class _FlowControlMixin(Transport):
     """All the logic for (write) flow control in a mix-in base class.
 

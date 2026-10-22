@@ -833,6 +833,33 @@ class SelectorSocketTransportTests(test_utils.TestCase):
         self.assertEqual(list_to_buffer([b'ta']), transport._buffer)
         self.assertEqual(data, bytearray(b'data'))  # Hasn't been mutated.
 
+    def test_write_partial_bytearray_reused(self):
+        # The caller can reuse its buffer as soon as write() returns.
+        data = bytearray(b'data')
+        self.sock.send.return_value = 2
+
+        transport = self.socket_transport()
+        transport.write(data)
+        data[:] = b'DATA'
+        data.clear()
+
+        self.assertEqual(list_to_buffer([b'ta']), transport._buffer)
+        self.assertEqual(transport.get_write_buffer_size(), 2)
+
+    def test_write_buffered_bytearray_reused(self):
+        data = bytearray(b'data')
+        self.sock.send.side_effect = BlockingIOError
+
+        transport = self.socket_transport()
+        transport.write(data)
+        transport.write(data)
+        transport.write(memoryview(data).toreadonly())
+        data[:] = b'DATA'
+        data.clear()
+
+        self.assertEqual(list_to_buffer([b'data'] * 3), transport._buffer)
+        self.assertEqual(transport.get_write_buffer_size(), 12)
+
     def test_write_partial_memoryview(self):
         data = memoryview(b'data')
         self.sock.send.return_value = 2
@@ -914,6 +941,34 @@ class SelectorSocketTransportTests(test_utils.TestCase):
         transport.writelines([data])
         self.assertTrue(self.sock.send.called)
         self.assertTrue(self.loop.writers)
+
+    def test_writelines_partial_bytearray_reused(self):
+        # The caller can reuse its buffers as soon as writelines() returns.
+        data = bytearray(b'data')
+        self.sock.send.return_value = 2
+        self.sock.send.fileno.return_value = 7
+
+        transport = self.socket_transport()
+        transport.writelines([data, memoryview(data)])
+        data[:] = b'DATA'
+
+        self.assertEqual(list_to_buffer([b'ta', b'data']), transport._buffer)
+        self.assertEqual(transport.get_write_buffer_size(), 6)
+
+    def test_writelines_buffered_bytearray_reused(self):
+        data = bytearray(b'data')
+        self.sock.send.side_effect = BlockingIOError
+        self.sock.send.fileno.return_value = 7
+
+        transport = self.socket_transport()
+        transport.write(b'head')
+        transport.writelines([data, memoryview(data)])
+        data[:] = b'DATA'
+        data.clear()
+
+        self.assertEqual(list_to_buffer([b'head', b'data', b'data']),
+                         transport._buffer)
+        self.assertEqual(transport.get_write_buffer_size(), 12)
 
     def test_writelines_pauses_protocol(self):
         data = memoryview(b'data')

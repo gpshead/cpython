@@ -1,0 +1,5 @@
+Fix :mod:`asyncio` socket and TLS transports sending the current contents of
+a :class:`bytearray` or writable :class:`memoryview` instead of the data
+passed to :meth:`~asyncio.WriteTransport.write` or
+:meth:`~asyncio.WriteTransport.writelines` when the object was modified
+before the data had been sent, and looping forever if it was emptied.

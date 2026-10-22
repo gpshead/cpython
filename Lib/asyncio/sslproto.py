@@ -698,13 +698,22 @@ class SSLProtocol(protocols.BufferedProtocol):
             self._conn_lost += 1
             return
 
+        # Don't copy what can be written now, only what stays in the backlog.
+        write_now = (self._state == SSLProtocolState.WRAPPED
+                     and not self._write_backlog)
         for data in list_of_data:
+            if not write_now:
+                data = transports._immutable_view(data)
             self._write_backlog.append(data)
             self._write_buffer_size += len(data)
 
         try:
             if self._state == SSLProtocolState.WRAPPED:
                 self._do_write()
+
+            if write_now and self._write_backlog:
+                self._write_backlog = collections.deque(
+                    map(transports._immutable_view, self._write_backlog))
 
         except Exception as ex:
             self._fatal_error(ex, 'Fatal error on SSL protocol')

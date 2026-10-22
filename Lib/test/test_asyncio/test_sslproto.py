@@ -265,6 +265,25 @@ class SslProtoHandshakeTests(test_utils.TestCase):
         # should not raise
         self.assertIsNone(transp.write(b'data'))
 
+    def test_write_backlog_bytearray_reused(self):
+        # The caller can reuse its buffer as soon as write() returns.
+        ssl_proto = self.ssl_protocol()
+        self.connection_made(ssl_proto)
+        test_utils.run_briefly(self.loop)
+        self.assertEqual(ssl_proto._state, sslproto.SSLProtocolState.WRAPPED)
+        transp = ssl_proto._app_transport
+
+        # sslobj.write() raises SSLWantReadError
+        data = bytearray(b'data')
+        transp.write(data)
+        transp.write(data)
+        transp.writelines([data, memoryview(data)])
+        data[:] = b'DATA'
+        data.clear()
+
+        self.assertEqual(list(ssl_proto._write_backlog), [b'data'] * 4)
+        self.assertEqual(transp.get_write_buffer_size(), 16)
+
 
 ##############################################################################
 # Start TLS Tests
