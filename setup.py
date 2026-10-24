@@ -2511,6 +2511,7 @@ class PyBuildExt(build_ext):
                     '_ssl/debughelpers.c',
                     '_ssl/misc.c',
                     '_ssl/cert.c',
+                    '_ssl/distrusted_spki.h',
                 ],
                 **openssl_extension_kwargs
             )
