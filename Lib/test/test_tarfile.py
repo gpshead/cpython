@@ -4678,6 +4678,43 @@ class TestExtractionFilters(unittest.TestCase):
 
     @symlink_test
     @os_helper.skip_unless_symlink
+    def test_link_resolving_to_destination(self):
+        # gh-160863: the 'data' filter rejects link members whose path
+        # resolves to the destination, even if the name is not lexically '.'.
+        def via_parent_name(arc):
+            arc.add('../dest', symlink_to='dest')
+
+        def via_symlink_to_dot(arc):
+            arc.add('d/')
+            arc.add('s', symlink_to='.')
+            arc.add('s/.', hardlink_to='d')
+
+        for make in via_parent_name, via_symlink_to_dot:
+            with ArchiveMaker() as arc:
+                make(arc)
+            with self.subTest(make.__name__):
+                with self.check_context(arc.open(), 'data'):
+                    self.expect_exception(tarfile.OutsideDestinationError)
+
+        # A symlink outside the destination that points at it must not be
+        # replaced.
+        with ArchiveMaker() as arc:
+            arc.add('first.txt', content='1')
+            arc.add('../current', symlink_to='real')
+            arc.add('later.txt', content='2')
+        with os_helper.temp_dir(self.outerdir):
+            real = self.outerdir / 'real'
+            current = self.outerdir / 'current'
+            real.mkdir()
+            current.symlink_to('real')
+            with arc.open() as tar:
+                with self.assertRaises(tarfile.OutsideDestinationError):
+                    tar.extractall(current, filter='data')
+            self.assertTrue(current.is_symlink())
+            self.assertEqual(os.listdir(real), ['first.txt'])
+
+    @symlink_test
+    @os_helper.skip_unless_symlink
     def test_empty_name_symlink_chain(self):
         # Regression test for a chain of empty-named symlinks that
         # incrementally redirects the destination outwards.
