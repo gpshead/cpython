@@ -1,0 +1,3 @@
+:func:`tarfile.data_filter` again rejects link members whose path resolves
+to the destination directory itself, such as ``../dest``.  :gh:`160097`
+had narrowed this check to names that are lexically ``.``.
