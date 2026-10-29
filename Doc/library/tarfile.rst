@@ -1132,7 +1132,9 @@ reused in custom filters:
     path (after following symlinks) would end up outside the destination.
     This raises :class:`~tarfile.OutsideDestinationError`.
   - :ref:`Refuse <tarfile-extraction-refuse>` to extract links (hard or soft)
-    whose name refers to the destination directory itself.
+    that would be made at the destination directory itself or outside it.
+    Only the directories leading to the link are resolved: a link replaces
+    whatever is at its own path rather than following it.
     This raises :class:`~tarfile.OutsideDestinationError`.
     Note that such files are refused even on platforms that do not support
     symbolic links.
@@ -1151,6 +1153,9 @@ reused in custom filters:
   .. versionchanged:: next
 
      Filenames containing ``..`` components are now normalized.
+
+     Links that would be made at the destination directory itself, or
+     at an existing symbolic link outside it, are now refused.
 
 .. function:: data_filter(member, path)
 
