@@ -854,12 +854,19 @@ def _get_filtered_attrs(member, dest_path, for_data=True):
                                    strict=os.path.ALLOW_MISSING)
     if os.path.commonpath([target_path, dest_path]) != dest_path:
         raise OutsideDestinationError(member, target_path)
-    # A link member named after the destination directory itself
-    # would replace it with a (sym)link, redirecting the destination
-    # for all subsequent members.
-    if ((member.islnk() or member.issym())
-            and os.path.normpath(name) == os.curdir):
-        raise OutsideDestinationError(member, target_path)
+    if member.islnk() or member.issym():
+        # A link is made at its own path without following a link already
+        # there (that is unlinked first), so judge it by where it is made:
+        # resolve only the parent directory.  The link must land strictly
+        # inside the destination; one that replaced the destination itself
+        # would redirect all subsequent members.
+        parent, leaf = os.path.split(name.rstrip('/' + os.sep))
+        parent = os.path.realpath(os.path.join(dest_path, parent),
+                                  strict=os.path.ALLOW_MISSING)
+        link_path = os.path.normpath(os.path.join(parent, leaf))
+        if (os.path.commonpath([link_path, dest_path]) != dest_path
+                or os.path.normcase(link_path) == os.path.normcase(dest_path)):
+            raise OutsideDestinationError(member, link_path)
     # Limit permissions (no high bits, and go-w)
     mode = member.mode
     if mode is not None:

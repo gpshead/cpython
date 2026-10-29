@@ -1,0 +1,5 @@
+:func:`tarfile.tar_filter` and :func:`tarfile.data_filter` now judge a link
+member by where the link would be made, resolving only its parent directory.
+This rejects links that reach the destination directory, or an existing
+symbolic link outside it, through ``..`` components or earlier symlink
+members, which :gh:`160097` had allowed past the ``'data'`` filter.

@@ -4678,6 +4678,82 @@ class TestExtractionFilters(unittest.TestCase):
 
     @symlink_test
     @os_helper.skip_unless_symlink
+    def test_link_reaching_destination(self):
+        # gh-160863: link members whose names are not lexically '.' but
+        # that would still be made at the destination directory itself.
+        def via_parent_name(arc):
+            arc.add('../dest', symlink_to='dest')
+
+        def via_symlink_to_dot(arc):
+            arc.add('d/')
+            arc.add('s', symlink_to='.')
+            arc.add('s/.', hardlink_to='d')
+
+        def via_symlink_to_dot_symlink(arc):
+            arc.add('s', symlink_to='.')
+            arc.add('s/.', symlink_to='.')
+
+        for make in (via_parent_name, via_symlink_to_dot,
+                     via_symlink_to_dot_symlink):
+            with ArchiveMaker() as arc:
+                make(arc)
+            for filter in 'tar', 'data':
+                with self.subTest(make.__name__, filter=filter):
+                    with self.check_context(arc.open(), filter):
+                        self.expect_exception(tarfile.OutsideDestinationError)
+
+    @symlink_test
+    @os_helper.skip_unless_symlink
+    def test_link_replacing_outer_symlink(self):
+        # gh-160863: a link member must not replace an existing symlink
+        # outside the destination, even one that points into it.
+        with ArchiveMaker() as arc:
+            arc.add('first.txt', content='1')
+            arc.add('../current', symlink_to='real')
+            arc.add('later.txt', content='2')
+        for filter in 'tar', 'data':
+            with self.subTest(filter=filter), \
+                    os_helper.temp_dir(self.outerdir):
+                real = self.outerdir / 'real'
+                current = self.outerdir / 'current'
+                real.mkdir()
+                current.symlink_to('real')
+                with arc.open() as tar:
+                    with self.assertRaises(tarfile.OutsideDestinationError):
+                        tar.extractall(current, filter=filter)
+                self.assertTrue(current.is_symlink())
+                self.assertEqual(os.listdir(real), ['first.txt'])
+
+        # The link's parent directory may also be reached through a
+        # symlink made earlier in the same archive.
+        with ArchiveMaker() as arc:
+            arc.add('s', symlink_to='..')
+            arc.add('s/outer', symlink_to='dest')
+        with os_helper.temp_dir(self.outerdir):
+            outer = self.outerdir / 'outer'
+            outer.symlink_to('dest')
+            with arc.open() as tar:
+                with self.assertRaises(tarfile.OutsideDestinationError):
+                    tar.extractall(self.destdir, filter='tar')
+            self.assertTrue(outer.is_symlink())
+
+    @symlink_test
+    @os_helper.skip_unless_symlink
+    def test_link_to_dot_reextracted(self):
+        # A symlink to '.' resolves to the destination once it exists;
+        # extracting the same archive again must still replace it.
+        with ArchiveMaker() as arc:
+            arc.add('self', symlink_to='.')
+        for filter in 'tar', 'data':
+            with self.subTest(filter=filter), \
+                    os_helper.temp_dir(self.outerdir):
+                for _ in range(2):
+                    with arc.open() as tar:
+                        tar.extractall(self.destdir, filter=filter)
+                self.assertEqual(os.readlink(self.destdir / 'self'), '.')
+
+    @symlink_test
+    @os_helper.skip_unless_symlink
     def test_empty_name_symlink_chain(self):
         # Regression test for a chain of empty-named symlinks that
         # incrementally redirects the destination outwards.
